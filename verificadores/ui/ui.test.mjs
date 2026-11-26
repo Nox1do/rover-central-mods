@@ -240,3 +240,71 @@ test('Firefox: no launcher during loading; same size and alignment as native spo
     assert.equal(await page.locator('#rs-vl-host').locator('dialog').isVisible(),true);
   } finally {await browser.close();}
 });
+
+
+test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover moneyline, notifications and threshold', async () => {
+  const browser=await firefox.launch({headless:true});
+  try {
+    const page=await browser.newPage({viewport:{width:1000,height:800}});
+    const halfFixture=fixture.replace('<td>Spread</td></tr>','<td>Spread</td><td>H1</td></tr>')
+      .replace('<xs>140.5</xs><xs>-4.5</xs></td></tr>','<xs>140.5</xs><xs>-4.5</xs></td><td><xs>65.5</xs><xs>-2.5</xs></td></tr>')
+      .replace('<xs>-2.5</xs><xs>159.5</xs></td></tr>','<xs>-2.5</xs><xs>159.5</xs></td><td><xs>-0.5</xs><xs>74.5</xs></td></tr>');
+    await page.route('https://roversport.net/**',route=>route.fulfill({contentType:'text/html',body:halfFixture}));
+    await page.goto('https://roversport.net/old.php');
+    await page.evaluate(()=>{window.GM_getResourceText=()=> '{}';window.notices=[];window.GM_notification=n=>window.notices.push(n);window.GM_xmlhttpRequest=()=>{throw Error('Unexpected network')};});
+    const marker='    let renderScheduled = false;';
+    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,parseFlashOdds,parseSbrHalf,asHalf,flipOdds,inversionViews,notifyAlerts,roverHalfSpread}; state.lastStarted=Date.now();\n'+marker);
+    await page.addScriptTag({content:setup});
+    const data=await page.evaluate(()=>{
+      const {state,render,readRover,assessAll,parseFlashOdds,parseSbrHalf,asHalf,flipOdds,inversionViews,roverHalfSpread}=window.testUI;
+      const rows=readRover(true), row=rows[0], rover=row.odds, now=Date.now();
+      const odds=(scope,spread,total)=>[
+        {bookmakerId:16,bettingScope:scope,bettingType:'ASIAN_HANDICAP',odds:[{active:true,value:'1.91',eventParticipantId:'A',handicap:{value:String(spread)}},{active:true,value:'1.91',eventParticipantId:'B',handicap:{value:String(-spread)}}]},
+        {bookmakerId:16,bettingScope:scope,bettingType:'OVER_UNDER',odds:[{active:true,value:'1.91',selection:'OVER',handicap:{value:String(total)}},{active:true,value:'1.91',selection:'UNDER',handicap:{value:String(total)}}]},
+        {bookmakerId:16,bettingScope:scope,bettingType:'HOME_AWAY',odds:[{active:true,value:'1.6',eventParticipantId:'A'},{active:true,value:'2.4',eventParticipantId:'B'}]}
+      ];
+      const payload={data:{findOddsByEventId:{settings:{bookmakers:[{bookmaker:{id:16,name:'bet365'}}]},odds:[...odds('FULL_TIME_OVER_TIME',4.5,140.5),...odds('FIRST_HALF',-2.5,66.5)]}}};
+      const ft=parseFlashOdds(payload,['A','B']), half=parseFlashOdds(payload,['A','B'],'FIRST_HALF');
+      const game={gameId:123,leagueName:'NCAAB',startDate:new Date(now+3600000).toISOString(),status:'6',homeTeam:{name:'Purdue'},awayTeam:{name:'Oklahoma'}};
+      const html=(scope,market,line)=>'<script id="__NEXT_DATA__" type="application/json">'+JSON.stringify({props:{pageProps:{league:'NCAAB',stringScope:scope,oddsTables:[{league:'NCAAB',oddsTableModel:{gameRows:[{gameView:game,oddsViews:[{gameId:123,sportsbook:'draftkings',currentLine:line},{gameId:123,sportsbook:'bet365',currentLine:{homeSpread:-10,awaySpread:10,total:100}}]}]}}]}}})+'</'+'script>';
+      const sp=parseSbrHalf(html('1st Half Point Spread','spread',{homeSpread:2.5,awaySpread:-2.5}),'spread')[0];
+      const to=parseSbrHalf(html('1st Half Totals','total',{total:66.5}),'total')[0];
+      const ml=parseSbrHalf(html('1st Half Money Line','money',{homeOdds:140,awayOdds:-160}),'money')[0];
+      let rejected=false;try{parseSbrHalf(html('Full Game','spread',{homeSpread:2.5,awaySpread:-2.5}),'spread')}catch{rejected=true}
+      const quotes={espn:{odds:{spread:4.5,total:140.5,money0:180,money1:-220}},flash:{odds:{...ft,...asHalf(half)}},sbr:{odds:asHalf(flipOdds({...sp.odds,...to.odds,...ml.odds},[1,0]))}};
+      const record={scheduledAt:now+3600000,teams:row.teams,rover,quotes,findings:assessAll(row,quotes)};
+      const one=assessAll(row,{espn:quotes.espn,flash:quotes.flash});
+      const normal=assessAll(row,{flash:{odds:{h1spread:2.5,h1total:65.9}},sbr:{odds:{h1spread:2.5,h1total:65.9}}});
+      state.current.set(row.id,record);state.checkedAt=now;render();
+      return {rover,second:rows[1].odds,ft,half,sp,findings:record.findings,inversions:inversionViews(record),one,normal,rejected,empty:roverHalfSpread(['',''])};
+    });
+    assert.equal(data.rover.h1spread,2.5);assert.equal(data.rover.h1total,65.5);
+    assert.equal(data.rover.h1money0,null);assert.equal(data.second.h1spread,-0.5);
+    assert.equal(data.ft.spread,4.5);assert.equal(data.half.spread,-2.5);
+    assert.equal(data.half.total,66.5);assert.equal(data.rejected,true);
+    assert.equal(data.empty.spread,null);
+    assert.equal(data.findings.find(f=>f.field==='spread').level,'ok');
+    assert.equal(data.findings.find(f=>f.field==='h1spread').level,'confirmed');
+    assert.equal(data.findings.find(f=>f.field==='h1total').level,'confirmed');
+    assert.equal(data.findings.find(f=>f.field==='h1money0').level,'unavailable');
+    assert.equal(data.findings.find(f=>f.field==='h1money0').entries.length,2);
+    assert.equal(data.one.find(f=>f.field==='h1spread').level,'review');
+    assert.equal(data.normal.find(f=>f.field==='h1total').level,'ok');
+    assert.equal(data.inversions.length,1);assert.equal(data.inversions[0].period,'h1');
+    const host=page.locator('#rs-vl-host');
+    await page.locator('#rs-vl-launcher').click();
+    await host.locator('details[data-event-id="1"] > summary').click();
+    const article=host.locator('article[data-event-id="1"]');
+    await article.waitFor();
+    assert.equal(await article.locator('[data-period-tab="h1"]').getAttribute('aria-pressed'),'true');
+    assert.equal(await article.locator('[data-inversion="spread"][data-period="h1"]').count(),1);
+    assert.ok((await article.innerText()).includes('Sin línea en Rover'));
+    assert.ok((await article.innerText()).includes('SportsbookReview'));
+    await article.locator('[data-period-tab="ft"]').click();
+    assert.equal(await article.locator('[data-inversion]').count(),0);
+    assert.ok((await article.innerText()).includes('FOX Sports'));
+    await page.evaluate(()=>{const {state,notifyAlerts}=window.testUI;const record=state.current.get('1');record.roverId='1';notifyAlerts([{record,item:record.findings.find(f=>f.field==='h1spread')}]);window.notices.at(-1).onclick()});
+    assert.equal(await article.locator('[data-period-tab="h1"]').getAttribute('aria-pressed'),'true');
+    assert.ok(await page.evaluate(()=>window.notices.at(-1).text.includes('Spread H1')));
+  }finally{await browser.close();}
+});
