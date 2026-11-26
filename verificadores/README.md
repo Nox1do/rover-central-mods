@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.4
+# Verificador de Lineas 0.0.5
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -45,7 +45,13 @@ Para inversiones de favorito en Spread o Moneyline, la tarjeta muestra el favori
 
 Botón azul suave VERIFICADOR junto a SOCCER, reinsertado cuando Rover reconstruye su barra. Modal nativo accesible con controles, métricas, filtros y lista de eventos desplegables. Conserva la vista de inversiones, exportación e historial. Alertas amarillas y rojas con acceso al evento desde la notificación. Verificación en segundo plano mientras la página siga cargada; no funciona con Firefox cerrado o la pestaña descargada. QA simula la API de Tampermonkey, por lo que el foco real de Windows 10 se valida en la sesión del usuario.
 
+## Interfaz 0.0.5
+
+El botón aparece únicamente cuando Rover carga la barra deportiva y al menos uno de sus botones es visible. Se coloca después de SOCCER cuando existe, replica las dimensiones, tipografía y márgenes del botón nativo visible y conserva el azul suave. ResizeObserver sincroniza cambios de tamaño y el observador de Rover vuelve a insertarlo tras reconstrucciones. No se crea un botón temporal fuera de la barra.
+
 ## Versiones
+
+- **0.0.5** — Corrección de posición y dimensiones del botón VERIFICADOR durante carga y actualización.
 
 - **0.0.4** — Modal, lista desplegable, alertas amarillas y activación de la pestaña original.
 

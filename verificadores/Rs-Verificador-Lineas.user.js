@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.4
+// @version      0.0.5
 // @description  Verifica Spread, Total y Moneyline FT pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -1090,15 +1090,49 @@
     const launcher = create('button', 'VERIFICADOR');
     launcher.id = 'rs-vl-launcher';
     launcher.type = 'button';
-    launcher.className = 'btn';
+    launcher.className = 'btn btn-dark';
     launcher.setAttribute('aria-haspopup', 'dialog');
     launcher.setAttribute('aria-expanded', 'false');
+    let launcherReference = null;
+    const launcherResize = new ResizeObserver(() => mountLauncher());
     function mountLauncher() {
         const menu = grid.querySelector('.goToButtons');
         const soccer = menu?.querySelector('button.goTo[goto="futbol"]');
-        if (soccer && launcher.previousElementSibling !== soccer) soccer.after(launcher);
-        else if (!soccer && menu && launcher.parentElement !== menu) menu.append(launcher);
-        else if (!menu && !launcher.isConnected) grid.before(launcher);
+        const visibleButtons = [...(menu?.querySelectorAll('button.goTo') || [])].filter(isVisible);
+        const reference = soccer && isVisible(soccer) ? soccer : visibleButtons.at(-1);
+        // Never show a temporary button outside the native sports menu.
+        if (!menu || !reference) {
+            launcherResize.disconnect();
+            launcherReference = null;
+            launcher.remove();
+            return;
+        }
+        const rect = reference.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+            launcher.remove();
+            return;
+        }
+        const computed = getComputedStyle(reference);
+        const properties = ['font-family','font-size','font-weight','font-style','line-height','letter-spacing',
+            'text-transform','padding-top','padding-right','padding-bottom','padding-left',
+            'margin-top','margin-right','margin-bottom','margin-left','border-radius'];
+        const dimensions = {
+            'box-sizing': 'border-box', width: rect.width + 'px', height: rect.height + 'px',
+            'min-width': rect.width + 'px', 'max-width': rect.width + 'px',
+            'min-height': rect.height + 'px', 'max-height': rect.height + 'px',
+            flex: '0 0 auto', 'align-self': 'center'
+        };
+        for (const key of properties) dimensions[key] = computed.getPropertyValue(key);
+        for (const [key, value] of Object.entries(dimensions)) {
+            if (launcher.style.getPropertyValue(key) !== value) launcher.style.setProperty(key, value);
+        }
+        const anchor = soccer || reference;
+        if (launcher.previousElementSibling !== anchor) anchor.after(launcher);
+        if (launcherReference !== reference) {
+            launcherResize.disconnect();
+            launcherReference = reference;
+            launcherResize.observe(reference);
+        }
     }
     const host = create('div');
     host.id = 'rs-vl-host';
@@ -1113,7 +1147,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.4'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.5'));
     title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
@@ -1180,7 +1214,7 @@
     root.append(isolatedStyles, modalStyles, tailwind, modal);
     const styles = create('style', '#logros tr[data-rs-vl="confirmed"] > td:first-child { box-shadow: inset 4px 0 #b02030; background: #fff0f0; } #logros tr[data-rs-vl="review"] > td:first-child { box-shadow: inset 4px 0 #9c6100; background: #fff5db; }');
     document.head.append(styles);
-    const launcherStyles = create('style', '#rs-vl-launcher{background:#dbeafe!important;color:#1e40af!important;border:1px solid #bfdbfe!important;margin:0 4px 0 4px;font:inherit;font-size:14px;border-radius:4px;padding:6px 12px}#rs-vl-launcher:hover{background:#bfdbfe!important}#rs-vl-launcher:focus-visible{outline:2px solid #2563eb;outline-offset:2px}');
+    const launcherStyles = create('style', '#rs-vl-launcher{background:#dbeafe!important;color:#1e40af!important;border:1px solid #bfdbfe!important;white-space:nowrap;text-align:center;transition:background-color .15s,color .15s;overflow:hidden}#rs-vl-launcher:hover{background:#bfdbfe!important}#rs-vl-launcher:focus-visible{outline:2px solid #2563eb;outline-offset:2px}');
     document.head.append(launcherStyles);
     document.body.append(host);
     function openModal() {
@@ -1192,6 +1226,7 @@
     modal.addEventListener('close', () => { launcher.setAttribute('aria-expanded', 'false'); if (launcher.isConnected) launcher.focus(); });
     modal.addEventListener('click', event => { if (event.target === modal) modal.close(); });
     mountLauncher();
+    document.fonts?.ready.then(mountLauncher);
     runButton.addEventListener('click', verify);
     downloadButton.addEventListener('click', download);
 
