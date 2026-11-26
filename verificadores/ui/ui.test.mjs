@@ -261,7 +261,7 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
       const odds=(scope,spread,total,book=16,mlType='HOME_AWAY')=>[
         {bookmakerId:book,bettingScope:scope,bettingType:'ASIAN_HANDICAP',odds:[{active:true,value:'1.91',eventParticipantId:'A',handicap:{value:String(spread)}},{active:true,value:'1.91',eventParticipantId:'B',handicap:{value:String(-spread)}}]},
         {bookmakerId:book,bettingScope:scope,bettingType:'OVER_UNDER',odds:[{active:true,value:'1.91',selection:'OVER',handicap:{value:String(total)}},{active:true,value:'1.91',selection:'UNDER',handicap:{value:String(total)}}]},
-        {bookmakerId:book,bettingScope:scope,bettingType:mlType,odds:[{active:true,value:'1.6',eventParticipantId:'A'},{active:true,value:'2.4',eventParticipantId:'B'}]}
+        {bookmakerId:book,bettingScope:scope,bettingType:mlType,odds:[{active:true,value:scope==='FIRST_HALF'?'1.6':'2.8',eventParticipantId:'A'},{active:true,value:scope==='FIRST_HALF'?'2.4':'1.45454545',eventParticipantId:'B'}]}
       ];
       const payload={data:{findOddsByEventId:{settings:{bookmakers:[{bookmaker:{id:16,name:'bet365'}},{bookmaker:{id:20,name:'bwin'}},{bookmaker:{id:30,name:'William Hill'}}]},odds:[
         ...odds('FULL_TIME_OVER_TIME',4.5,140.5),
