@@ -1197,7 +1197,7 @@
 
     let renderScheduled = false;
     const visibleCheck = () => {
-        if (!document.hidden && Date.now() - state.lastStarted >= INTERVAL && readRover(true).length) void verify();
+        if (Date.now() - state.lastStarted >= INTERVAL && readRover(true).length) void verify();
     };
     const observer = new MutationObserver(records => {
         if (renderScheduled || !records.some(record => record.type !== 'attributes' || /^(?:id|style|hidden)$/.test(record.attributeName))) return;
