@@ -14,7 +14,7 @@ Con **BASKETBALL** visible, la verificación empieza cuando Rover carga la tabla
 | Over/Under | 2 puntos | Diferencia en el total del partido. |
 | Moneyline | 20 puntos | Se compara cada equipo. +100 y −100 son equivalentes. La inversión del favorito también se señala. |
 
-ESPN/DraftKings y FlashscoreUSA/bet365 son las fuentes principales. FOX se consulta si queda un mercado sin confirmar o con datos incompletos. El color rojo y la notificación de escritorio requieren dos fuentes distintas que detecten una diferencia en el mismo sentido para el mismo mercado. Una señal sin confirmar se marca en ámbar. La lista **Discrepancias** muestra los valores de Rover y de las fuentes que respondieron.
+ESPN/DraftKings, FlashscoreUSA/bet365.us y FlashscoreUSA/BetMGM.us son las fuentes principales FT. FlashscoreUSA/DraftKings sirve como respaldo de la misma casa y nunca suma una confirmación adicional. H1 usa DraftKings, bet365.us y BetMGM.us. FOX se consulta si queda un mercado FT sin confirmar o incompleto y se muestra como referencia, sin contar como casa identificada. El rojo requiere dos casas identificadas que detecten una diferencia en el mismo sentido para el mismo mercado. Una señal sin confirmar se marca en ámbar; las alertas de ambos niveles pueden generar notificaciones de escritorio. La lista **Discrepancias** muestra los valores de Rover y de las fuentes que respondieron.
 
 El cruce utiliza los códigos de equipo del mapa NCAAB, ambos equipos y la hora de inicio en Nueva York. El orden de equipos se ajusta por fuente. Un cruce ambiguo queda sin vincular. En Flashscore se toman selecciones activas de FT con prórroga. Si hay varias líneas con ambos lados activos, se toma la pareja con los precios más equilibrados.
 
@@ -26,7 +26,7 @@ El botón genera un archivo `.xlsx` con cuatro hojas.
 |---|---|
 | Lineas actuales | Foto de las filas cargadas por Rover, incluso las de secciones ocultas, con los equipos y las líneas publicadas en la tabla. |
 | Discrepancias | Diferencias confirmadas y señales por revisar que corresponden a la foto. |
-| Fuentes | Cuotas FT e identificadores de los partidos consultados. |
+| Fuentes | Cuotas FT y H1 e identificadores de los partidos consultados. |
 | Historial 30 dias | Cambios observados, primera diferencia, confirmación y resolución. |
 
 El historial se conserva en IndexedDB durante 30 días en el perfil de Firefox y dominio donde se usa el script. Una resolución requiere dos referencias comparables dentro del umbral. La notificación se emite al detectar una nueva discrepancia amarilla y al confirmar una roja. IndexedDB conserva el estado de aviso por incidente para evitar repeticiones; una resolución permite volver a notificar. Al pulsar la notificación, Tampermonkey solicita resaltar la pestaña original y el script abre el modal y el evento correspondiente. El sistema operativo y Firefox gestionan la presentación y el foco.
@@ -49,7 +49,7 @@ Botón azul suave VERIFICADOR junto a SOCCER, reinsertado cuando Rover reconstru
 
 El botón aparece únicamente cuando Rover carga la barra deportiva y al menos uno de sus botones es visible. Se coloca después de SOCCER cuando existe, replica las dimensiones, tipografía y márgenes del botón nativo visible y conserva el azul suave. ResizeObserver sincroniza cambios de tamaño y el observador de Rover vuelve a insertarlo tras reconstrucciones. No se crea un botón temporal fuera de la barra.
 
-## Mercados 0.0.6
+## Mercados 0.0.6 (histórico)
 
 FT conserva ESPN/DraftKings, FlashscoreUSA/bet365 y FOX condicional. H1 usa bet365, bwin y William Hill, tres casas identificadas en la misma respuesta de FlashscoreUSA (scope FIRST_HALF). No se incorpora SportsbookReview ni se realizan peticiones adicionales por evento. Spread y total H1: umbral de 1 punto; Moneyline: 20 unidades; inversiones válidas sin umbral. Dos casas con discrepancia en la misma dirección confirman; una sola deja amarillo. Los mercados de dos resultados HOME_AWAY no se mezclan con HOME_DRAW_AWAY ni DRAW_NO_BET. No se garantiza independencia de infraestructura ni vigencia individual de cada cuota (la respuesta no expone timestamp comprobado por selección).
 
