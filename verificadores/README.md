@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.1
+# Verificador de Lineas 0.0.2
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -31,6 +31,14 @@ El botón genera un archivo `.xlsx` con cuatro hojas.
 
 El historial se conserva en IndexedDB durante 30 días en el perfil de Firefox y dominio donde se usa el script. Una resolución requiere dos referencias comparables dentro del umbral. La notificación se emite al confirmar la discrepancia. Si está disponible, la notificación vuelve a la pestaña y abre la lista.
 
+## Interfaz 0.0.2
+
+Panel aislado con Shadow DOM y Tailwind CSS 3.4.17 compilado, sin CDN ni Preflight global. Contadores por partido, tarjetas agrupadas por encuentro, comparación de mercados por columnas, nombres reales de equipos, filtros y panel plegable. Las fuentes, umbrales, verificación y exportación XLSX se conservan. Los contadores de alertas y datos incompletos pueden coincidir en un mismo encuentro.
+
+Compilación reproducible: `npx tailwindcss@3.4.17 -c verificadores/ui/tailwind.config.cjs -i verificadores/ui/tailwind.css -o /tmp/rs-vl.css --minify`. Las pruebas de UI se ejecutan en Firefox headless mediante GitHub Actions, con datos simulados.
+
 ## Versiones
+
+- **0.0.2** — Rediseño de interfaz y botones; no cambia el motor de verificación.
 
 - **0.0.1** — Verificación pregame de NCAAB, confirmación por dos fuentes, historial local y exportación de líneas.
