@@ -253,35 +253,36 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
     await page.goto('https://roversport.net/old.php');
     await page.evaluate(()=>{window.GM_getResourceText=()=> '{}';window.notices=[];window.GM_notification=n=>window.notices.push(n);window.GM_xmlhttpRequest=()=>{throw Error('Unexpected network')};});
     const marker='    let renderScheduled = false;';
-    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,parseFlashOdds,parseSbrHalf,asHalf,flipOdds,inversionViews,notifyAlerts,roverHalfSpread}; state.lastStarted=Date.now();\n'+marker);
+    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,parseFlashOdds,asHalf,flipOdds,inversionViews,notifyAlerts,roverHalfSpread}; state.lastStarted=Date.now();\n'+marker);
     await page.addScriptTag({content:setup});
     const data=await page.evaluate(()=>{
-      const {state,render,readRover,assessAll,parseFlashOdds,parseSbrHalf,asHalf,flipOdds,inversionViews,roverHalfSpread}=window.testUI;
+      const {state,render,readRover,assessAll,parseFlashOdds,asHalf,flipOdds,inversionViews,roverHalfSpread}=window.testUI;
       const rows=readRover(true), row=rows[0], rover=row.odds, now=Date.now();
-      const odds=(scope,spread,total)=>[
-        {bookmakerId:16,bettingScope:scope,bettingType:'ASIAN_HANDICAP',odds:[{active:true,value:'1.91',eventParticipantId:'A',handicap:{value:String(spread)}},{active:true,value:'1.91',eventParticipantId:'B',handicap:{value:String(-spread)}}]},
-        {bookmakerId:16,bettingScope:scope,bettingType:'OVER_UNDER',odds:[{active:true,value:'1.91',selection:'OVER',handicap:{value:String(total)}},{active:true,value:'1.91',selection:'UNDER',handicap:{value:String(total)}}]},
-        {bookmakerId:16,bettingScope:scope,bettingType:'HOME_AWAY',odds:[{active:true,value:'1.6',eventParticipantId:'A'},{active:true,value:'2.4',eventParticipantId:'B'}]}
+      const odds=(scope,spread,total,book=16,mlType='HOME_AWAY')=>[
+        {bookmakerId:book,bettingScope:scope,bettingType:'ASIAN_HANDICAP',odds:[{active:true,value:'1.91',eventParticipantId:'A',handicap:{value:String(spread)}},{active:true,value:'1.91',eventParticipantId:'B',handicap:{value:String(-spread)}}]},
+        {bookmakerId:book,bettingScope:scope,bettingType:'OVER_UNDER',odds:[{active:true,value:'1.91',selection:'OVER',handicap:{value:String(total)}},{active:true,value:'1.91',selection:'UNDER',handicap:{value:String(total)}}]},
+        {bookmakerId:book,bettingScope:scope,bettingType:mlType,odds:[{active:true,value:'1.6',eventParticipantId:'A'},{active:true,value:'2.4',eventParticipantId:'B'}]}
       ];
-      const payload={data:{findOddsByEventId:{settings:{bookmakers:[{bookmaker:{id:16,name:'bet365'}}]},odds:[...odds('FULL_TIME_OVER_TIME',4.5,140.5),...odds('FIRST_HALF',-2.5,66.5)]}}};
+      const payload={data:{findOddsByEventId:{settings:{bookmakers:[{bookmaker:{id:16,name:'bet365'}},{bookmaker:{id:20,name:'bwin'}},{bookmaker:{id:30,name:'William Hill'}}]},odds:[
+        ...odds('FULL_TIME_OVER_TIME',4.5,140.5),
+        ...odds('FIRST_HALF',-2.5,66.5),
+        ...odds('FIRST_HALF',-2.5,66.5,20),
+        ...odds('FIRST_HALF',2.5,65.5,30,'HOME_DRAW_AWAY'),
+        ...odds('FULL_TIME_OVER_TIME',-10,100,30)
+      ]}}};
       const ft=parseFlashOdds(payload,['A','B']), half=parseFlashOdds(payload,['A','B'],'FIRST_HALF');
-      const game={gameId:123,leagueName:'NCAAB',startDate:new Date(now+3600000).toISOString(),status:'6',homeTeam:{name:'Purdue'},awayTeam:{name:'Oklahoma'}};
-      const html=(scope,market,line)=>'<script id="__NEXT_DATA__" type="application/json">'+JSON.stringify({props:{pageProps:{league:'NCAAB',stringScope:scope,oddsTables:[{league:'NCAAB',oddsTableModel:{gameRows:[{gameView:game,oddsViews:[{gameId:123,sportsbook:'draftkings',currentLine:line},{gameId:123,sportsbook:'bet365',currentLine:{homeSpread:-10,awaySpread:10,total:100}}]}]}}]}}})+'</'+'script>';
-      const sp=parseSbrHalf(html('1st Half Point Spread','spread',{homeSpread:2.5,awaySpread:-2.5}),'spread')[0];
-      const to=parseSbrHalf(html('1st Half Totals','total',{total:66.5}),'total')[0];
-      const ml=parseSbrHalf(html('1st Half Money Line','money',{homeOdds:140,awayOdds:-160}),'money')[0];
-      let rejected=false;try{parseSbrHalf(html('Full Game','spread',{homeSpread:2.5,awaySpread:-2.5}),'spread')}catch{rejected=true}
-      const quotes={espn:{odds:{spread:4.5,total:140.5,money0:180,money1:-220}},flash:{odds:{...ft,...asHalf(half)}},sbr:{odds:asHalf(flipOdds({...sp.odds,...to.odds,...ml.odds},[1,0]))}};
+      const bwin=parseFlashOdds(payload,['A','B'],'FIRST_HALF','bwin'), wh=parseFlashOdds(payload,['A','B'],'FIRST_HALF','William Hill');
+      const quotes={espn:{odds:{spread:4.5,total:140.5,money0:180,money1:-220}},flash:{odds:{...ft,...asHalf(half)}},bwin:{odds:asHalf(bwin)},wh:{odds:asHalf(wh)}};
       const record={scheduledAt:now+3600000,teams:row.teams,rover,quotes,findings:assessAll(row,quotes)};
       const one=assessAll(row,{espn:quotes.espn,flash:quotes.flash});
-      const normal=assessAll(row,{flash:{odds:{h1spread:2.5,h1total:65.9}},sbr:{odds:{h1spread:2.5,h1total:65.9}}});
+      const normal=assessAll(row,{flash:{odds:{h1spread:2.5,h1total:65.9}},bwin:{odds:{h1spread:2.5,h1total:65.9}}});
       state.current.set(row.id,record);state.checkedAt=now;render();
-      return {rover,second:rows[1].odds,ft,half,sp,findings:record.findings,inversions:inversionViews(record),one,normal,rejected,empty:roverHalfSpread(['',''])};
+      return {rover,second:rows[1].odds,ft,half,bwin,wh,findings:record.findings,inversions:inversionViews(record),one,normal,empty:roverHalfSpread(['',''])};
     });
     assert.equal(data.rover.h1spread,2.5);assert.equal(data.rover.h1total,65.5);
     assert.equal(data.rover.h1money0,null);assert.equal(data.second.h1spread,-0.5);
     assert.equal(data.ft.spread,4.5);assert.equal(data.half.spread,-2.5);
-    assert.equal(data.half.total,66.5);assert.equal(data.rejected,true);
+    assert.equal(data.half.total,66.5);assert.equal(data.wh.money0,null);assert.equal(data.wh.spread,2.5);assert.equal(data.bwin.spread,-2.5);
     assert.equal(data.empty.spread,null);
     assert.equal(data.findings.find(f=>f.field==='spread').level,'ok');
     assert.equal(data.findings.find(f=>f.field==='h1spread').level,'confirmed');
@@ -299,7 +300,7 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
     assert.equal(await article.locator('[data-period-tab="h1"]').getAttribute('aria-pressed'),'true');
     assert.equal(await article.locator('[data-inversion="spread"][data-period="h1"]').count(),1);
     assert.ok((await article.innerText()).includes('Sin línea en Rover'));
-    assert.ok((await article.innerText()).includes('SportsbookReview'));
+    assert.ok((await article.innerText()).includes('William Hill'));
     await article.locator('[data-period-tab="ft"]').click();
     assert.equal(await article.locator('[data-inversion]').count(),0);
     assert.ok((await article.innerText()).includes('FOX Sports'));
