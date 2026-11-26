@@ -708,7 +708,7 @@
             const logos = [...item.row.querySelectorAll('div.equipo')].map(node => {
                 const img = node.querySelector('img');
                 try {
-                    const raw = img?.currentSrc || img?.getAttribute('src');
+                    const raw = img?.getAttribute('src') || img?.currentSrc;
                     if (!raw) return '';
                     const url = new URL(raw, document.baseURI);
                     return ['https:', 'http:'].includes(url.protocol) ? url.href : '';
