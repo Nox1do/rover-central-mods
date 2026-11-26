@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.3
+# Verificador de Lineas 0.0.4
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -6,7 +6,7 @@ Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rov
 
 ## Verificación
 
-Con **BASKETBALL** visible, la verificación empieza cuando Rover carga la tabla. Revisa los partidos pregame de **NCAAB** cada cinco minutos mientras la pestaña está activa. **Verificar ahora** ejecuta una revisión manual. La lectura de Rover se hace desde la tabla de la página.
+Con **BASKETBALL** visible, la verificación empieza cuando Rover carga la tabla. Revisa los partidos pregame de **NCAAB** cada cinco minutos mientras la página permanezca abierta (Firefox puede ralentizar los temporizadores en segundo plano). **Verificar ahora** ejecuta una revisión manual. La lectura de Rover se hace desde la tabla de la página.
 
 | Mercado FT | Umbral | Regla |
 |---|---:|---|
@@ -29,7 +29,7 @@ El botón genera un archivo `.xlsx` con cuatro hojas.
 | Fuentes | Cuotas FT e identificadores de los partidos consultados. |
 | Historial 30 dias | Cambios observados, primera diferencia, confirmación y resolución. |
 
-El historial se conserva en IndexedDB durante 30 días en el perfil de Firefox y dominio donde se usa el script. Una resolución requiere dos referencias comparables dentro del umbral. La notificación se emite al confirmar la discrepancia. Si está disponible, la notificación vuelve a la pestaña y abre la lista.
+El historial se conserva en IndexedDB durante 30 días en el perfil de Firefox y dominio donde se usa el script. Una resolución requiere dos referencias comparables dentro del umbral. La notificación se emite al detectar una nueva discrepancia amarilla y al confirmar una roja. IndexedDB conserva el estado de aviso por incidente para evitar repeticiones; una resolución permite volver a notificar. Al pulsar la notificación, Tampermonkey solicita resaltar la pestaña original y el script abre el modal y el evento correspondiente. El sistema operativo y Firefox gestionan la presentación y el foco.
 
 ## Interfaz 0.0.2
 
@@ -41,7 +41,13 @@ Compilación reproducible: `npx tailwindcss@3.4.17 -c verificadores/ui/tailwind.
 
 Para inversiones de favorito en Spread o Moneyline, la tarjeta muestra el favorito de Rover y el de las fuentes que observan la inversión, sus logos originales (iniciales si no cargan), las cuotas individuales y, para Spread, un eje con Pick'em y la distancia en puntos. Moneyline muestra una sola vista por partido aunque ambos lados estén afectados. Las discrepancias normales mantienen la tabla. Una inversión solo se presenta en rojo si dos fuentes que sustentan el hallazgo confirman la inversión; si una sola la detecta, se muestra en ámbar incluso si el mercado tiene otra discrepancia confirmada. No cambia la evaluación ni notificación preexistente del motor.
 
+## Interfaz 0.0.4
+
+Botón azul suave VERIFICADOR junto a SOCCER, reinsertado cuando Rover reconstruye su barra. Modal nativo accesible con controles, métricas, filtros y lista de eventos desplegables. Conserva la vista de inversiones, exportación e historial. Alertas amarillas y rojas con acceso al evento desde la notificación. Verificación en segundo plano mientras la página siga cargada; no funciona con Firefox cerrado o la pestaña descargada. QA simula la API de Tampermonkey, por lo que el foco real de Windows 10 se valida en la sesión del usuario.
+
 ## Versiones
+
+- **0.0.4** — Modal, lista desplegable, alertas amarillas y activación de la pestaña original.
 
 - **0.0.3** — Vista especial para inversiones de favorito FT, con logos y evidencia por fuente.
 
