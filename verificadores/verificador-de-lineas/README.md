@@ -17,7 +17,7 @@ npm run build
 ```
 
 ## Pendientes de aceptación
-Pruebas reales con Tampermonkey/Firefox, reconstrucción del DOM, notificaciones, persistencia y apertura del XLSX. Covers HTML y timestamps son observados pero conector no ejecutado en Firefox en esta sesión. No instalar en producción sin verificar. Los tests unitarios se ejecutaron en V8 antes de publicar; Node/Firefox CI no verificado.
+CI Node y Firefox headless con fixtures aprobada (29 unitarias y 1 integración; incluye DOM, Covers, alerta roja, reconstrucción y cuatro hojas XLSX mediante mock). Queda la aceptación con Tampermonkey instalado en Firefox del usuario, red externa real desde esa sesión, permisos de notificación/sonido y apertura del archivo XLSX binario. No instalar en producción sin verificar.
 
 ## Referencias
 - https://www.tampermonkey.net/documentation.php

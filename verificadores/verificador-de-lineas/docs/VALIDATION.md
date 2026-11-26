@@ -35,3 +35,11 @@ Pruebas ejecutadas directamente en V8 antes de crear el commit. Integración Fir
 - Adapters publicados probados con respuestas reales HTTP 200 de ESPN y FOX: ESPN 20 pregame completos, FOX 20 pregame completos. Oklahoma-Purdue IDs ESPN 401906807 y FOX 264833; spread +4.5/-4.5 y total 140.5 en ambos. Se verificó que los parsers extraen ML por equipo.
 - Corrección de alertas visuales en fallos parciales: el fallo de una fuente no invalida una confirmación de otras dos.
 - Se validó sintaxis de la distribución con compilación de V8. Prueba de navegador real pendiente.
+
+## GitHub Actions y matching real
+
+- Pipeline inicial: Node 29/29 y build correctos; fallo al instalar Firefox porque ubuntu-latest ya apunta a Ubuntu 26.04. Corregido fijando Ubuntu 24.04.
+- Pipeline de la corrección: https://github.com/Nox1do/rover-central-mods/actions/runs/45859711613, commit 211db222fce1fcc54c0a08fd2ce9cb175b8e4e7b, éxito confirmado; build y snapshot exactos, 29 pruebas Node, 1 integración Firefox headless con fixtures y stubs GM/XLSX.
+- Consulta posterior de Rover, ESPN y FOX: HTTP 200 en las tres; 18/18 eventos Rover pregame vinculados por IDs y horario a ESPN y FOX, 15 verdes y 3 amarillos antes de Covers. La extracción HTML usada para esta comprobación en V8 fue independiente del DOM real de Firefox.
+- Covers HTTP 200 con mercados y atribución de casas comprobados en el HTML. En la consulta de 16:33 UTC del 26/11/2026, BetMGM tenía ML y Spread con 2 min de antigüedad; varios totales y otras casas superaban 30 min. Se descartan esas observaciones por precaución. No se comprobó red real de Covers dentro de Tampermonkey.
+- No se verificó la apertura real de un XLSX generado por SheetJS, ni los permisos de escritorio y audio de Windows. Las pruebas de navegador interceptan peticiones y simulan las APIs GM y XLSX.
