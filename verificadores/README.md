@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.6
+# Verificador de Lineas 0.0.7
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -55,7 +55,13 @@ FT conserva ESPN/DraftKings, FlashscoreUSA/bet365 y FOX condicional. H1 usa bet3
 
 Rover publica H1 spread/total; Moneyline H1 se muestra desde fuentes externas como informativo hasta que Rover publique una columna ML H1 explícita. H1 y FT se separan en pestañas, avisos, historial y columnas XLSX. Se añade la pestaña H1 en el evento cuando existe su mercado Rover. Si una casa no tiene cuota comparable, aparece —. La exportación conserva los datos crudos de Rover, incluido H1, y separa los campos externos por periodo. Validación real 26/11/2026: muestra de 12 partidos con bet365 y William Hill spread/total 12/12, bwin spread 11/12 y total 12/12; Moneyline de dos resultados bet365 y bwin 12/12, William Hill 0/12. Disponibilidad variable.
 
+## Fuentes 0.0.7
+
+FlashscoreUSA consulta el catálogo US/NJ (`projectId=130`, `geoIpCode=US`, `geoIpSubdivisionCode=USNJ`) una sola vez por evento. H1: DraftKings, bet365.us y BetMGM.us, siempre FIRST_HALF. FT: ESPN/DraftKings prioritario, bet365.us y BetMGM.us; Flashscore/DraftKings se muestra y sirve de respaldo únicamente en mercados FULL_TIME_OVER_TIME. El feed observado publica Spread/Total DraftKings bajo FULL_TIME, por lo que no se equiparan a FT con prórroga sin verificar la semántica del proveedor. DraftKings nunca cuenta dos veces por mercado; si ESPN tiene el dato, Flashscore/DraftKings es informativo. FOX conserva su consulta condicional como referencia, pero no confirma independientemente (su API no identifica la casa). Para confirmar rojo se requieren dos casas identificadas con diferencias del mismo signo. Los nombres antiguos de fuentes se conservan en XLSX para el historial 30 días. No cambia el intervalo ni los umbrales. La respuesta usa un mismo agregador, por lo que no se presume independencia de infraestructura ni frescura por cuota. Los parámetros regionales no implican disponibilidad de servicios de apuestas ni garantizan acceso desde toda ubicación. QA valida parser con datos reales y navegador con fixtures; el acceso desde Tampermonkey del usuario requiere prueba local.
+
 ## Versiones
+
+- **0.0.7** — Catálogo US/NJ, H1 con DraftKings, bet365.us y BetMGM.us; deduplicación por casa y exclusión de scopes incompatibles.
 
 - **0.0.6** — H1 con tres casas de FlashscoreUSA y umbrales separados.
 
