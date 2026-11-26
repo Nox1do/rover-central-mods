@@ -1,0 +1,21 @@
+name: Verificador UI QA
+on:
+  push:
+    branches: ['verificadores/ui-0.0.2']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --package-lock=false tailwindcss@3.4.17 playwright@1.56.1
+      - run: npx tailwindcss -c verificadores/ui/tailwind.config.cjs -i verificadores/ui/tailwind.css -o /tmp/rs-vl.css --minify
+      - run: node -e "console.log('VL_CSS_START'+require('fs').readFileSync('/tmp/rs-vl.css','utf8')+'VL_CSS_END')"
+      - run: node --check verificadores/Rs-Verificador-Lineas.user.js
+      - run: npx playwright install --with-deps firefox
+      - run: node --test verificadores/ui/ui.test.mjs
