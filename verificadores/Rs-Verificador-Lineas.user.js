@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.8
+// @version      0.0.9
 // @description  Verifica Spread, Total y Moneyline FT/H1 pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -35,14 +35,14 @@
     const FEED_SIGNATURE = 'SW9D1eZo';
     const FOX_WEB_KEY = 'jE7yBJVRNAwdDesMgTzTXUUSx1It41Fq';
     const MARKETS = {
-        spread: { label: 'Spread', threshold: 2 },
+        spread: { label: 'Spread', threshold: 1 },
         total: { label: 'Total', threshold: 2 },
-        money0: { label: 'ML equipo 1', threshold: 20 },
-        money1: { label: 'ML equipo 2', threshold: 20 },
+        money0: { label: 'ML equipo 1', threshold: 40 },
+        money1: { label: 'ML equipo 2', threshold: 40 },
         h1spread: { label: 'H1 Spread', threshold: 1 },
         h1total: { label: 'H1 Total', threshold: 1 },
-        h1money0: { label: 'H1 ML equipo 1', threshold: 20 },
-        h1money1: { label: 'H1 ML equipo 2', threshold: 20 }
+        h1money0: { label: 'H1 ML equipo 1', threshold: 40 },
+        h1money1: { label: 'H1 ML equipo 2', threshold: 40 }
     };
     // Legacy names are retained solely for decoding the 30-day history.
     const SOURCES = {
@@ -471,7 +471,9 @@
             const reversed = base === 'spread'
                 ? Math.sign(value) * Math.sign(rv) === -1
                 : moneyline && favorite(scopedOdds(rover, period)) * favorite(scopedOdds(odds, period)) === -1;
-            return [{ source, value, delta, reversed, counted, duplicate, exceeds: !duplicate && (reversed || Math.abs(delta) >= market.threshold) }];
+            const difference = Math.abs(delta);
+            const outsideTolerance = base === 'total' ? difference >= market.threshold : difference > market.threshold;
+            return [{ source, value, delta, reversed, counted, duplicate, exceeds: !duplicate && (reversed || outsideTolerance) }];
         });
         const outliers = entries.filter(entry => entry.exceeds);
         const confirmed = [-1, 1].map(direction => outliers.filter(entry => entry.counted && Math.sign(entry.delta) === direction))
@@ -1271,7 +1273,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.8'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.9'));
     title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT + H1 · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');

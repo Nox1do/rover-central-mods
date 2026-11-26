@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.8
+# Verificador de Lineas 0.0.9
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -8,11 +8,11 @@ Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rov
 
 Con **BASKETBALL** visible, la verificación empieza cuando Rover carga la tabla. Revisa los partidos pregame de **NCAAB** cada cinco minutos mientras la página permanezca abierta (Firefox puede ralentizar los temporizadores en segundo plano). **Verificar ahora** ejecuta una revisión manual. La lectura de Rover se hace desde la tabla de la página.
 
-| Mercado FT | Umbral | Regla |
-|---|---:|---|
-| Spread | 2 puntos | Diferencia en el mismo equipo de referencia. La inversión del favorito también se señala. |
-| Over/Under | 2 puntos | Diferencia en el total del partido. |
-| Moneyline | 20 puntos | Se compara cada equipo. +100 y −100 son equivalentes. La inversión del favorito también se señala. |
+| Mercado | Diferencia que activa la señal FT | Diferencia que activa la señal H1 | Regla |
+|---|---:|---:|---|
+| Spread | Más de 1 punto | Más de 1 punto | Se compara el mismo equipo de referencia. La inversión del favorito también se señala. |
+| Over/Under | Desde 2 puntos | Desde 1 punto | Se compara el total del periodo. |
+| Moneyline | Más de 40 puntos de cuota | Más de 40 puntos de cuota, si Rover publica ML H1 | Se compara cada equipo. +100 y −100 son equivalentes. La inversión del favorito también se señala. |
 
 ESPN/DraftKings, FlashscoreUSA/bet365.us y FlashscoreUSA/BetMGM.us son las fuentes principales FT. FlashscoreUSA/DraftKings sirve como respaldo de la misma casa y nunca suma una confirmación adicional. H1 usa DraftKings, bet365.us y BetMGM.us. FOX se consulta si queda un mercado FT sin confirmar o incompleto y se muestra como referencia, sin contar como casa identificada. El rojo requiere dos casas identificadas que detecten una diferencia en el mismo sentido para el mismo mercado. Una señal sin confirmar se marca en ámbar; las alertas de ambos niveles pueden generar notificaciones de escritorio. La lista **Discrepancias** muestra los valores de Rover y de las fuentes que respondieron.
 
@@ -64,6 +64,8 @@ FlashscoreUSA consulta el catálogo US/NJ (`projectId=130`, `geoIpCode=US`, `geo
 Dos controles compactos de solo icono junto a Eventos y resultados expanden o contraen los detalles de todos los eventos del filtro activo. Conservan el estado de los eventos fuera del filtro y la pestaña FT/H1 seleccionada. Los controles se deshabilitan cuando no hay eventos que expandir o contraer y tienen nombres accesibles y tooltips.
 
 ## Versiones
+
+- **0.0.9** — Tolera hasta 40 puntos de cuota en Moneyline y hasta 1 punto en Spread, tanto en FT como en H1.
 
 - **0.0.8** — Iconos para expandir y contraer todos los eventos visibles.
 
