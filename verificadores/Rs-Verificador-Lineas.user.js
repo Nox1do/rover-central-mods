@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.3
+// @version      0.0.4
 // @description  Verifica Spread, Total y Moneyline FT pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -463,8 +463,9 @@
 
     function newAlerts(record, previous) {
         return record.findings.filter(item => {
-            if (item.level !== 'confirmed') return false;
             const prior = previous?.incidents?.[item.field];
+            if (item.level === 'review') return !prior || Boolean(prior.resolvedAt) || (!prior.reviewNotifiedAt && !prior.confirmedAt);
+            if (item.level !== 'confirmed') return false;
             return !prior?.confirmedAt || prior.resolvedAt || prior.direction !== item.sign
                 || (item.reversed && !prior.reversed);
         });
@@ -483,6 +484,7 @@
                 startedAt: continuing ? old.startedAt : now,
                 sources: continuing ? old.sources : item.entries.filter(entry => entry.exceeds).map(entry => entry.source),
                 confirmedAt: (continuing && old.confirmedAt) || (item.level === 'confirmed' ? now : null),
+                reviewNotifiedAt: (continuing && old.reviewNotifiedAt) || (item.level === 'review' ? now : null),
                 direction: item.sign || (continuing ? old.direction : 0),
                 reversed: item.reversed || Boolean(continuing && old.reversed),
                 resolvedAt: null
@@ -627,7 +629,7 @@
                 }
             }
             state.current = new Map(current.map(record => [record.roverId, record]));
-            if (!document.hidden) notifyAlerts(alerts);
+            notifyAlerts(alerts);
             const failed = [...new Set([...contexts.values()].flatMap(context => context.errors))];
             if (foxUnavailable) failed.push('FOX');
             state.checkedAt = Date.now();
@@ -648,17 +650,36 @@
     }
 
     function notifyAlerts(alerts) {
-        if (!alerts.length) return;
-        const first = alerts[0];
-        const text = `${first.record.teams.map(team => team.name).join(' – ')} · ${MARKETS[first.item.field].label}`;
-        try {
-            GM_notification({
-                title: 'Rover · Discrepancia confirmada',
-                text: alerts.length > 1 ? `${text} y ${alerts.length - 1} alertas más` : text,
-                timeout: 9000, onclick: () => { window.focus(); panel.open = true; }
-            });
-        } catch (error) {
-            console.warn('[Verificador de Lineas] No se pudo mostrar la notificación.', error);
+        for (const level of ['confirmed', 'review']) {
+            const selected = alerts.filter(({item}) => item.level === level);
+            if (!selected.length) continue;
+            const matches = new Map();
+            for (const {record, item} of selected) {
+                if (!matches.has(record.roverId)) matches.set(record.roverId, { record, items: [] });
+                matches.get(record.roverId).items.push(item);
+            }
+            const first = matches.values().next().value;
+            const text = first.record.teams.map(team => team.name).join(' – ') + ' · ' +
+                first.items.map(item => marketLabel(item.field, first.record.teams) + ': Rover ' +
+                    displayValue(item.field, item.rover) + ' / ' +
+                    item.entries.filter(e => e.exceeds).map(e => SOURCES[e.source] + ' ' + displayValue(item.field, e.value)).join(', ')).join(' · ') +
+                (matches.size > 1 ? ' · ' + (matches.size - 1) + ' partido(s) más' : '');
+            try {
+                GM_notification({
+                    title: level === 'confirmed' ? 'Rover · Discrepancia confirmada' : 'Rover · Líneas por revisar (amarillo)',
+                    text, timeout: 12000, highlight: true, silent: false,
+                    onclick: () => {
+                        window.focus();
+                        activeFilter = level;
+                        expandedEvents.add(first.record.roverId);
+                        openModal();
+                        const target = [...alertList.children].find(el => el.dataset.eventId === first.record.roverId);
+                        if (target) { target.open = true; target.scrollIntoView({block:'nearest'}); }
+                    }
+                });
+            } catch (error) {
+                console.warn('[Verificador de Lineas] No se pudo mostrar la notificación.', error);
+            }
         }
     }
 
@@ -681,6 +702,9 @@
     }
 
     const tones = {
+        ok: { label: 'Sin discrepancias', pill: 'tw-bg-slate-100 tw-text-emerald-700', line: 'tw-border-slate-200', value: 'tw-text-emerald-700' },
+        missing: { label: 'Datos incompletos', pill: 'tw-bg-slate-100 tw-text-slate-600', line: 'tw-border-slate-200', value: 'tw-text-slate-600' },
+        pending: { label: 'Sin verificar', pill: 'tw-bg-slate-100 tw-text-slate-600', line: 'tw-border-slate-200', value: 'tw-text-slate-600' },
         confirmed: { label: 'Confirmada', pill: 'tw-bg-red-100 tw-text-red-800', line: 'tw-border-red-200', value: 'tw-text-red-700' },
         review: { label: 'Por revisar', pill: 'tw-bg-amber-100 tw-text-amber-900', line: 'tw-border-amber-200', value: 'tw-text-amber-800' },
         stale: { label: 'Línea cambió', pill: 'tw-bg-blue-100 tw-text-blue-800', line: 'tw-border-blue-200', value: 'tw-text-blue-700' }
@@ -696,15 +720,20 @@
         for (const item of rows) {
             item.row.removeAttribute('data-rs-vl');
             const record = state.current.get(item.id);
-            if (!record || (record.scheduledAt && record.scheduledAt <= Date.now())) continue;
+            if (record?.scheduledAt && record.scheduledAt <= Date.now()) continue;
+            if (!record) {
+                groups.push({ id: item.id, teams: item.teams, time: item.time, level: 'pending', flags: [] });
+                continue;
+            }
             if (JSON.stringify(item.odds) !== JSON.stringify(record.rover)) {
                 groups.push({ id: item.id, teams: item.teams, time: item.time, level: 'stale', flags: [] });
                 continue;
             }
-            const flags = record.findings.filter(f => ['confirmed', 'review'].includes(f.level));
-            if (!flags.length) continue;
-            const level = flags.some(f => f.level === 'confirmed') ? 'confirmed' : 'review';
-            item.row.dataset.rsVl = level;
+            const flags = record.findings;
+            const level = flags.some(f => f.level === 'confirmed') ? 'confirmed' :
+                flags.some(f => f.level === 'review') ? 'review' :
+                flags.some(f => f.level === 'missing') || !record.scheduledAt ? 'missing' : 'ok';
+            if (level === 'confirmed' || level === 'review') item.row.dataset.rsVl = level;
             const logos = [...item.row.querySelectorAll('div.equipo')].map(node => {
                 const img = node.querySelector('img');
                 try {
@@ -717,7 +746,7 @@
             groups.push({ id: item.id, teams: record.teams, time: item.time, level, flags, previous: record.previous,
                 inversions: inversionViews(record), logos });
         }
-        const rank = { confirmed: 0, review: 1, stale: 2 };
+        const rank = { confirmed: 0, review: 1, stale: 2, missing: 3, pending: 4, ok: 5 };
         return groups.sort((a, b) => rank[a.level] - rank[b.level]);
     }
 
@@ -863,7 +892,7 @@
         return block;
     }
 
-    function makeCard(group) {
+    function makeCard(group, showHeader = true) {
         const card = ui('article', 'tw-rounded-lg tw-border tw-bg-white tw-overflow-hidden ' + tones[group.level].line);
         card.dataset.eventId = group.id;
         const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2 tw-px-3 tw-py-2 tw-bg-slate-50');
@@ -871,9 +900,9 @@
         names.append(ui('div', 'tw-font-semibold tw-text-sm tw-text-slate-900 tw-break-words', group.teams.map(t => t.name).join(' vs. ')),
             ui('div', 'tw-text-xs tw-text-slate-500', (group.time || 'Hora pendiente') + ' NY · ID ' + group.id));
         title.append(names, badge(group.level));
-        card.append(title);
+        if (showHeader) card.append(title);
         if (!group.flags.length) {
-            card.append(ui('p', 'tw-m-0 tw-px-3 tw-py-3 tw-text-sm tw-text-blue-800', 'La línea de Rover cambió después de la última consulta. Pendiente de verificar.'));
+            card.append(ui('p', 'tw-m-0 tw-px-3 tw-py-3 tw-text-sm tw-text-blue-800', group.level === 'stale' ? 'La línea de Rover cambió después de la última consulta. Pendiente de verificar.' : 'Todavía no hay resultados de verificación para este evento.'));
             return card;
         }
         for (const view of group.inversions || []) card.append(makeInversion(group, view));
@@ -914,7 +943,37 @@
         return card;
     }
 
+    function makeEvent(group) {
+        const details = ui('details', 'tw-rounded-lg tw-border tw-bg-white ' + tones[group.level].line);
+        details.dataset.eventId = group.id;
+        details.open = expandedEvents.has(group.id);
+        const summary = ui('summary', 'tw-cursor-pointer tw-px-3 tw-py-2');
+        const line = ui('span', 'tw-inline-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2 tw-text-sm');
+        line.style.cssText = 'width:calc(100% - 24px);vertical-align:middle';
+        const names = ui('span', 'tw-font-semibold tw-text-slate-900', group.teams.map(t => t.name).join(' vs. '));
+        const meta = ui('span', 'tw-inline-flex tw-flex-wrap tw-items-center tw-gap-2 tw-text-xs tw-text-slate-500');
+        meta.append(ui('span', 'tw-tabular-nums', (group.time || '—') + ' NY'), badge(group.level));
+        line.append(names, meta);
+        summary.append(line);
+        const content = ui('div', 'tw-px-2 tw-py-2');
+        const populate = () => { if (!content.hasChildNodes()) content.append(makeCard(group, false)); };
+        if (details.open) populate();
+        details.addEventListener('toggle', () => {
+            if (!details.isConnected) return;
+            if (details.open) { expandedEvents.add(group.id); populate(); }
+            else expandedEvents.delete(group.id);
+        });
+        details.append(summary, content);
+        return details;
+    }
+
+    function matchesFilter(group, key) {
+        return key === 'all' || group.level === key ||
+            (['review','missing'].includes(key) && group.level !== 'stale' && group.flags.some(f => f.level === key));
+    }
+
     function render() {
+        mountLauncher();
         const rows = readRover(true);
         const groups = groupAlerts(rows);
         const counts = { linked: 0, unlinked: 0, confirmed: 0, review: 0, missing: 0 };
@@ -931,18 +990,21 @@
         }
         const total = groups.length;
         summaryCount.textContent = total + (total === 1 ? ' partido' : ' partidos');
+        launcher.title = 'Abrir verificador · ' + groups.filter(g => ['confirmed','review'].includes(g.level)).length + ' eventos con alertas';
         checkedLabel.textContent = state.checkedAt ? 'Última consulta: ' + timeLabel(state.checkedAt) + ' NY' : 'Aún sin verificar';
         for (const [key, button] of Object.entries(filterButtons)) {
-            const n = key === 'all' ? total : groups.filter(g => g.level === key || (key === 'review' && g.flags.some(f => f.level === 'review'))).length;
+            const n = key === 'all' ? total : groups.filter(g => matchesFilter(g, key)).length;
             button.textContent = filterNames[key] + ' (' + n + ')';
             button.setAttribute('aria-pressed', String(activeFilter === key));
         }
-        const signature = JSON.stringify([activeFilter, groups]);
+        const signature = JSON.stringify([activeFilter, groups, [...expandedEvents]]);
         if (signature === lastView) return;
         lastView = signature;
-        const shown = activeFilter === 'all' ? groups : groups.filter(g => g.level === activeFilter || (activeFilter === 'review' && g.flags.some(f => f.level === 'review')));
-        alertList.replaceChildren(...shown.map(makeCard));
-        if (!shown.length) alertList.append(ui('p', 'tw-m-0 tw-rounded-lg tw-border tw-border-dashed tw-border-slate-200 tw-p-4 tw-text-center tw-text-sm tw-text-slate-500', total ? 'No hay partidos para este filtro.' : 'Sin alertas visibles.'));
+        const shown = groups.filter(g => matchesFilter(g, activeFilter));
+        const scrollTop = alertList.scrollTop;
+        alertList.replaceChildren(...shown.map(makeEvent));
+        alertList.scrollTop = scrollTop;
+        if (!shown.length) alertList.append(ui('p', 'tw-m-0 tw-rounded-lg tw-border tw-border-dashed tw-border-slate-200 tw-p-4 tw-text-center tw-text-sm tw-text-slate-500', total ? 'No hay partidos para este filtro.' : 'No hay eventos visibles.'));
     }
 
     function appendSheet(workbook, name, rows) {
@@ -1025,9 +1087,25 @@
 
     const grid = document.querySelector('#logros');
     if (!grid) return;
+    const launcher = create('button', 'VERIFICADOR');
+    launcher.id = 'rs-vl-launcher';
+    launcher.type = 'button';
+    launcher.className = 'btn';
+    launcher.setAttribute('aria-haspopup', 'dialog');
+    launcher.setAttribute('aria-expanded', 'false');
+    function mountLauncher() {
+        const menu = grid.querySelector('.goToButtons');
+        const soccer = menu?.querySelector('button.goTo[goto="futbol"]');
+        if (soccer && launcher.previousElementSibling !== soccer) soccer.after(launcher);
+        else if (!soccer && menu && launcher.parentElement !== menu) menu.append(launcher);
+        else if (!menu && !launcher.isConnected) grid.before(launcher);
+    }
     const host = create('div');
     host.id = 'rs-vl-host';
     const root = host.attachShadow({ mode: 'open' });
+    const modal = create('dialog');
+    modal.id = 'rs-vl-modal';
+    modal.setAttribute('aria-labelledby', 'rs-vl-title');
     const toolbar = ui('section', 'tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-p-3 tw-shadow-sm tw-text-slate-800');
     toolbar.id = 'rs-vl-toolbar';
     toolbar.setAttribute('aria-label', 'Verificador de Lineas');
@@ -1035,7 +1113,8 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.3'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.4'));
+    title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     const buttonBase = 'tw-inline-flex tw-items-center tw-justify-center tw-gap-2 tw-rounded-lg tw-border tw-px-3 tw-py-2 tw-text-sm tw-font-semibold tw-cursor-pointer tw-transition-colors disabled:tw-opacity-50 disabled:tw-cursor-not-allowed';
@@ -1054,7 +1133,10 @@
     }
     runButton.prepend(actionIcon(['M20 11a8 8 0 1 0-2.3 5.7L20 14', 'M20 20v-6h-6']));
     downloadButton.prepend(actionIcon(['M12 3v12', 'M7 10l5 5 5-5', 'M4 17v3h16v-3']));
-    actions.append(runButton, downloadButton);
+    const closeButton = ui('button', buttonBase + ' tw-border-slate-200 tw-bg-white tw-text-slate-700 hover:tw-bg-slate-100', 'Cerrar');
+    closeButton.type = 'button';
+    closeButton.addEventListener('click', () => modal.close());
+    actions.append(runButton, downloadButton, closeButton);
     head.append(heading, actions);
     const metricGrid = ui('div', 'tw-mt-3 tw-grid tw-grid-cols-2 sm:tw-grid-cols-5 tw-gap-2');
     const metricValues = {};
@@ -1073,15 +1155,15 @@
     status.setAttribute('role', 'status');
     const checkedLabel = ui('span','tw-tabular-nums','Aún sin verificar');
     info.append(status, checkedLabel);
-    const panel = ui('details','tw-mt-3 tw-border-t tw-border-slate-200 tw-pt-3');
-    panel.open = true;
-    const summary = ui('summary','tw-cursor-pointer tw-font-semibold tw-text-sm tw-text-slate-800','Discrepancias ');
+    const panel = ui('section','tw-mt-3 tw-border-t tw-border-slate-200 tw-pt-3');
+    const summary = ui('h3','tw-m-0 tw-font-semibold tw-text-sm tw-text-slate-800','Eventos y resultados ');
     const summaryCount = ui('span','tw-ml-1 tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600','0 partidos');
     summary.append(summaryCount);
     const filters = ui('div','tw-mt-3 tw-flex tw-flex-wrap tw-gap-1');
-    const filterNames = { all:'Todos', confirmed:'Confirmadas', review:'Por revisar', stale:'Cambios' };
+    const filterNames = { all:'Todos', confirmed:'Confirmadas', review:'Por revisar', stale:'Cambios', missing:'Incompletos', ok:'Sin discrepancias', pending:'Sin verificar' };
     const filterButtons = {};
     let activeFilter = 'all', lastView = '';
+    const expandedEvents = new Set();
     for (const [key, label] of Object.entries(filterNames)) {
         const b = ui('button','tw-rounded-md tw-border tw-border-slate-200 tw-bg-white tw-px-2 tw-py-1 tw-text-xs tw-font-medium tw-text-slate-700 tw-cursor-pointer hover:tw-bg-slate-100',label);
         b.type = 'button'; b.setAttribute('aria-pressed',String(key === activeFilter));
@@ -1093,10 +1175,23 @@
     toolbar.append(head, metricGrid, info, panel);
     const tailwind = create('style', ".tw-m-0{margin:0}.tw-ml-1{margin-left:.25rem}.tw-mt-1{margin-top:.25rem}.tw-mt-2{margin-top:.5rem}.tw-mt-3{margin-top:.75rem}.tw-flex{display:flex}.tw-inline-flex{display:inline-flex}.tw-grid{display:grid}.tw-max-h-96{max-height:24rem}.tw-w-full{width:100%}.tw-min-w-0{min-width:0}.tw-min-w-36{min-width:9rem}.tw-border-collapse{border-collapse:collapse}.tw-cursor-pointer{cursor:pointer}.tw-grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.tw-flex-col{flex-direction:column}.tw-flex-wrap{flex-wrap:wrap}.tw-items-center{align-items:center}.tw-justify-center{justify-content:center}.tw-justify-between{justify-content:space-between}.tw-gap-1{gap:.25rem}.tw-gap-2{gap:.5rem}.tw-gap-3{gap:.75rem}.tw-divide-y>:not([hidden])~:not([hidden]){--tw-divide-y-reverse:0;border-top-width:calc(1px*(1 - var(--tw-divide-y-reverse)));border-bottom-width:calc(1px*var(--tw-divide-y-reverse))}.tw-divide-slate-100>:not([hidden])~:not([hidden]){--tw-divide-opacity:1;border-color:rgb(241 245 249/var(--tw-divide-opacity,1))}.tw-overflow-hidden{overflow:hidden}.tw-overflow-x-auto{overflow-x:auto}.tw-overflow-y-auto{overflow-y:auto}.tw-whitespace-nowrap{white-space:nowrap}.tw-break-words{overflow-wrap:break-word}.tw-rounded-full{border-radius:9999px}.tw-rounded-lg{border-radius:.5rem}.tw-rounded-md{border-radius:.375rem}.tw-rounded-xl{border-radius:.75rem}.tw-border{border-width:1px}.tw-border-b{border-bottom-width:1px}.tw-border-t{border-top-width:1px}.tw-border-dashed{border-style:dashed}.tw-border-amber-200{--tw-border-opacity:1;border-color:rgb(253 230 138/var(--tw-border-opacity,1))}.tw-border-blue-200{--tw-border-opacity:1;border-color:rgb(191 219 254/var(--tw-border-opacity,1))}.tw-border-emerald-700{--tw-border-opacity:1;border-color:rgb(4 120 87/var(--tw-border-opacity,1))}.tw-border-red-200{--tw-border-opacity:1;border-color:rgb(254 202 202/var(--tw-border-opacity,1))}.tw-border-slate-200{--tw-border-opacity:1;border-color:rgb(226 232 240/var(--tw-border-opacity,1))}.tw-border-slate-900{--tw-border-opacity:1;border-color:rgb(15 23 42/var(--tw-border-opacity,1))}.tw-bg-amber-100{--tw-bg-opacity:1;background-color:rgb(254 243 199/var(--tw-bg-opacity,1))}.tw-bg-blue-100{--tw-bg-opacity:1;background-color:rgb(219 234 254/var(--tw-bg-opacity,1))}.tw-bg-red-100{--tw-bg-opacity:1;background-color:rgb(254 226 226/var(--tw-bg-opacity,1))}.tw-bg-slate-100{--tw-bg-opacity:1;background-color:rgb(241 245 249/var(--tw-bg-opacity,1))}.tw-bg-slate-50{--tw-bg-opacity:1;background-color:rgb(248 250 252/var(--tw-bg-opacity,1))}.tw-bg-slate-900{--tw-bg-opacity:1;background-color:rgb(15 23 42/var(--tw-bg-opacity,1))}.tw-bg-white{--tw-bg-opacity:1;background-color:rgb(255 255 255/var(--tw-bg-opacity,1))}.tw-p-3{padding:.75rem}.tw-p-4{padding:1rem}.tw-px-2{padding-left:.5rem;padding-right:.5rem}.tw-px-3{padding-left:.75rem;padding-right:.75rem}.tw-py-0\\.5{padding-top:.125rem;padding-bottom:.125rem}.tw-py-1{padding-top:.25rem;padding-bottom:.25rem}.tw-py-2{padding-top:.5rem;padding-bottom:.5rem}.tw-py-3{padding-bottom:.75rem}.tw-pt-3,.tw-py-3{padding-top:.75rem}.tw-text-left{text-align:left}.tw-text-center{text-align:center}.tw-align-top{vertical-align:top}.tw-text-base{font-size:1rem;line-height:1.5rem}.tw-text-sm{font-size:.875rem;line-height:1.25rem}.tw-text-xl{font-size:1.25rem;line-height:1.75rem}.tw-text-xs{font-size:.75rem;line-height:1rem}.tw-font-bold{font-weight:700}.tw-font-medium{font-weight:500}.tw-font-normal{font-weight:400}.tw-font-semibold{font-weight:600}.tw-tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal) var(--tw-slashed-zero) var(--tw-numeric-figure) var(--tw-numeric-spacing) var(--tw-numeric-fraction)}.tw-text-amber-800{--tw-text-opacity:1;color:rgb(146 64 14/var(--tw-text-opacity,1))}.tw-text-amber-900{--tw-text-opacity:1;color:rgb(120 53 15/var(--tw-text-opacity,1))}.tw-text-blue-700{--tw-text-opacity:1;color:rgb(29 78 216/var(--tw-text-opacity,1))}.tw-text-blue-800{--tw-text-opacity:1;color:rgb(30 64 175/var(--tw-text-opacity,1))}.tw-text-emerald-700{--tw-text-opacity:1;color:rgb(4 120 87/var(--tw-text-opacity,1))}.tw-text-emerald-800{--tw-text-opacity:1;color:rgb(6 95 70/var(--tw-text-opacity,1))}.tw-text-red-700{--tw-text-opacity:1;color:rgb(185 28 28/var(--tw-text-opacity,1))}.tw-text-red-800{--tw-text-opacity:1;color:rgb(153 27 27/var(--tw-text-opacity,1))}.tw-text-slate-500{--tw-text-opacity:1;color:rgb(100 116 139/var(--tw-text-opacity,1))}.tw-text-slate-600{--tw-text-opacity:1;color:rgb(71 85 105/var(--tw-text-opacity,1))}.tw-text-slate-700{--tw-text-opacity:1;color:rgb(51 65 85/var(--tw-text-opacity,1))}.tw-text-slate-800{--tw-text-opacity:1;color:rgb(30 41 59/var(--tw-text-opacity,1))}.tw-text-slate-900{--tw-text-opacity:1;color:rgb(15 23 42/var(--tw-text-opacity,1))}.tw-text-white{--tw-text-opacity:1;color:rgb(255 255 255/var(--tw-text-opacity,1))}.tw-shadow-sm{--tw-shadow:0 1px 2px 0 rgba(0,0,0,.05);--tw-shadow-colored:0 1px 2px 0 var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow,0 0 #0000),var(--tw-ring-shadow,0 0 #0000),var(--tw-shadow)}.tw-transition-colors{transition-property:color,background-color,border-color,text-decoration-color,fill,stroke;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.hover\\:tw-bg-emerald-50:hover{--tw-bg-opacity:1;background-color:rgb(236 253 245/var(--tw-bg-opacity,1))}.hover\\:tw-bg-slate-100:hover{--tw-bg-opacity:1;background-color:rgb(241 245 249/var(--tw-bg-opacity,1))}.hover\\:tw-bg-slate-700:hover{--tw-bg-opacity:1;background-color:rgb(51 65 85/var(--tw-bg-opacity,1))}.disabled\\:tw-cursor-not-allowed:disabled{cursor:not-allowed}.disabled\\:tw-opacity-50:disabled{opacity:.5}@media (min-width:640px){.sm\\:tw-grid-cols-5{grid-template-columns:repeat(5,minmax(0,1fr))}}");
     const isolatedStyles = create('style', ':host{display:block;margin:8px 0;font:14px Arial,sans-serif;color:#1e293b;line-height:1.4}*,*::before,*::after{box-sizing:border-box;border-width:0;border-style:solid}button{font-family:inherit}button:focus-visible,summary:focus-visible{outline:2px solid #2563eb;outline-offset:2px}button[aria-pressed="true"]{background:#e2e8f0;border-color:#64748b;color:#0f172a}button[aria-busy="true"]{cursor:wait}table{font:inherit}th,td{vertical-align:top}summary{list-style-position:inside}');
-    root.append(isolatedStyles, tailwind, toolbar);
+    const modalStyles = create('style', ':host{margin:0!important;display:block}dialog{width:min(960px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);margin:auto;padding:0;background:transparent;border:0;color:inherit;overflow:auto}dialog::backdrop{background:rgba(15,23,42,.48)}dialog:not([open]){display:none}#rs-vl-toolbar{max-width:100%}');
+    modal.append(toolbar);
+    root.append(isolatedStyles, modalStyles, tailwind, modal);
     const styles = create('style', '#logros tr[data-rs-vl="confirmed"] > td:first-child { box-shadow: inset 4px 0 #b02030; background: #fff0f0; } #logros tr[data-rs-vl="review"] > td:first-child { box-shadow: inset 4px 0 #9c6100; background: #fff5db; }');
     document.head.append(styles);
-    grid.before(host);
+    const launcherStyles = create('style', '#rs-vl-launcher{background:#dbeafe!important;color:#1e40af!important;border:1px solid #bfdbfe!important;margin:0 4px 0 4px;font:inherit;font-size:14px;border-radius:4px;padding:6px 12px}#rs-vl-launcher:hover{background:#bfdbfe!important}#rs-vl-launcher:focus-visible{outline:2px solid #2563eb;outline-offset:2px}');
+    document.head.append(launcherStyles);
+    document.body.append(host);
+    function openModal() {
+        render();
+        if (!modal.open) modal.showModal();
+        launcher.setAttribute('aria-expanded', 'true');
+    }
+    launcher.addEventListener('click', openModal);
+    modal.addEventListener('close', () => { launcher.setAttribute('aria-expanded', 'false'); if (launcher.isConnected) launcher.focus(); });
+    modal.addEventListener('click', event => { if (event.target === modal) modal.close(); });
+    mountLauncher();
     runButton.addEventListener('click', verify);
     downloadButton.addEventListener('click', download);
 
