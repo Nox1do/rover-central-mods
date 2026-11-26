@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.6
+// @version      0.0.7
 // @description  Verifica Spread, Total y Moneyline FT/H1 pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -44,13 +44,23 @@
         h1money0: { label: 'H1 ML equipo 1', threshold: 20 },
         h1money1: { label: 'H1 ML equipo 2', threshold: 20 }
     };
+    // Legacy names are retained solely for decoding the 30-day history.
     const SOURCES = {
         espn: 'ESPN / DraftKings',
-        flash: 'FlashscoreUSA / bet365',
+        dk: 'FlashscoreUSA / DraftKings',
+        flashUs: 'FlashscoreUSA / bet365.us',
+        mgm: 'FlashscoreUSA / BetMGM.us',
         fox: 'FOX Sports',
+        flash: 'FlashscoreUSA / bet365',
         bwin: 'FlashscoreUSA / bwin',
         wh: 'FlashscoreUSA / William Hill'
     };
+    const SOURCE_KEYS = {
+        ft: ['espn', 'dk', 'flashUs', 'mgm', 'fox'],
+        h1: ['dk', 'flashUs', 'mgm']
+    };
+    const BOOKMAKER_KEYS = {espn: 'draftkings', dk: 'draftkings', flashUs: 'bet365', mgm: 'betmgm'};
+    const US_ODDS_REGION = {projectId: '130', geoIpCode: 'US', geoIpSubdivisionCode: 'USNJ'};
     const FIELDS = Object.keys(MARKETS);
     const FT_FIELDS = FIELDS.filter(field => !field.startsWith('h1'));
     const periodOf = field => field.startsWith('h1') ? 'h1' : 'ft';
@@ -360,7 +370,7 @@
         return pairs[0]?.line ?? null;
     }
 
-    function parseFlashOdds(payload, participants, scope = 'FULL_TIME_OVER_TIME', bookmakerName = 'bet365') {
+    function parseFlashOdds(payload, participants, scope = 'FULL_TIME_OVER_TIME', bookmakerName = 'bet365.us') {
         const root = payload?.data?.findOddsByEventId;
         if (!root) throw new Error('Flashscore no devolvió el evento');
         if (participants.some(id => !id) || participants[0] === participants[1]) return {};
@@ -387,15 +397,22 @@
 
     async function flashQuote(match) {
         const params = new URLSearchParams({
-            _hash: 'oce', eventId: match.event.id, projectId: '130', geoIpCode: 'DO', geoIpSubdivisionCode: 'DO01'
+            _hash: 'oce', eventId: match.event.id, ...US_ODDS_REGION
         });
         const payload = await request(`https://global.ds.lsapp.eu/odds/pq_graphql?${params}`);
         const teams = match.order.map(index => match.event.teams[index].id);
-        return {
-            flash: {id: match.event.id, odds: {...parseFlashOdds(payload, teams), ...asHalf(parseFlashOdds(payload, teams, 'FIRST_HALF'))}},
-            bwin: {id: match.event.id, odds: asHalf(parseFlashOdds(payload, teams, 'FIRST_HALF', 'bwin'))},
-            wh: {id: match.event.id, odds: asHalf(parseFlashOdds(payload, teams, 'FIRST_HALF', 'William Hill'))}
-        };
+        return parseUsFlashQuotes(payload, teams, match.event.id);
+    }
+
+    function parseUsFlashQuotes(payload, teams, id) {
+        const quotes = {};
+        for (const [key, bookmaker] of [['dk','DraftKings'], ['flashUs','bet365.us'], ['mgm','BetMGM.us']]) {
+            // Do not reinterpret FULL_TIME as FULL_TIME_OVER_TIME, even for DraftKings.
+            const ft = parseFlashOdds(payload, teams, 'FULL_TIME_OVER_TIME', bookmaker);
+            const h1 = parseFlashOdds(payload, teams, 'FIRST_HALF', bookmaker);
+            quotes[key] = {id, odds: {...ft, ...asHalf(h1)}};
+        }
+        return quotes;
     }
 
     async function loadFox() {
@@ -437,23 +454,31 @@
         const base = baseField(field);
         const period = periodOf(field);
         const moneyline = base.startsWith('money');
-        const allowed = period === 'h1' ? ['flash','bwin','wh'] : ['espn','flash','fox'];
-        const entries = Object.entries(sources).filter(([source]) => allowed.includes(source)).flatMap(([source, { odds }]) => {
+        const allowed = SOURCE_KEYS[period];
+        const seenBooks = new Set();
+        // ESPN is first for FT; Flashscore DraftKings is a fallback, never a second vote.
+        const entries = allowed.flatMap(source => {
+            const odds = sources[source]?.odds;
+            if (!odds) return [];
             const value = odds[field];
             if (!isNumber(value) || (period === 'ft' && !isNumber(rv))) return [];
-            if (!isNumber(rv)) return [{source, value, delta: null, reversed: false, exceeds: false}];
+            const book = BOOKMAKER_KEYS[source];
+            const duplicate = Boolean(book && seenBooks.has(book));
+            if (book) seenBooks.add(book);
+            const counted = Boolean(book && !duplicate);
+            if (!isNumber(rv)) return [{source, value, delta: null, reversed: false, exceeds: false, counted, duplicate}];
             const delta = moneyline ? americanDistance(value) - americanDistance(rv) : value - rv;
             const reversed = base === 'spread'
                 ? Math.sign(value) * Math.sign(rv) === -1
                 : moneyline && favorite(scopedOdds(rover, period)) * favorite(scopedOdds(odds, period)) === -1;
-            return [{ source, value, delta, reversed, exceeds: reversed || Math.abs(delta) >= market.threshold }];
+            return [{ source, value, delta, reversed, counted, duplicate, exceeds: !duplicate && (reversed || Math.abs(delta) >= market.threshold) }];
         });
         const outliers = entries.filter(entry => entry.exceeds);
-        const confirmed = [-1, 1].map(direction => outliers.filter(entry => Math.sign(entry.delta) === direction))
+        const confirmed = [-1, 1].map(direction => outliers.filter(entry => entry.counted && Math.sign(entry.delta) === direction))
             .find(group => group.length >= 2);
         return {
             field, rover: rv, entries,
-            level: period === 'h1' && !isNumber(rv) ? 'unavailable' : confirmed ? 'confirmed' : outliers.length ? 'review' : entries.length >= 2 ? 'ok' : 'missing',
+            level: period === 'h1' && !isNumber(rv) ? 'unavailable' : confirmed ? 'confirmed' : outliers.length ? 'review' : entries.filter(entry => entry.counted).length >= 2 ? 'ok' : 'missing',
             sign: confirmed ? Math.sign(confirmed[0].delta) : 0,
             reversed: Boolean(confirmed?.some(entry => entry.reversed) ?? outliers.some(entry => entry.reversed))
         };
@@ -812,7 +837,7 @@
             const before = original < 0 ? 0 : 1, after = 1 - before;
             const evidence = [];
             const confirmed = flags.some(f => f.level === 'confirmed' && f.sign &&
-                new Set(f.entries.filter(e => e.reversed && e.exceeds && Math.sign(e.delta) === f.sign).map(e => e.source)).size >= 2);
+                new Set(f.entries.filter(e => e.counted !== false && e.reversed && e.exceeds && Math.sign(e.delta) === f.sign).map(e => e.source)).size >= 2);
             for (const source of Object.keys(SOURCES)) {
                 const matching = flags.flatMap(f => f.entries.filter(e => e.source === source && e.reversed && e.exceeds));
                 if (!matching.length) continue;
@@ -962,8 +987,9 @@
             content.replaceChildren();
             for (const view of group.inversions || []) if (view.period === period) content.append(makeInversion(group, view));
             content.append(makeMarketTable(group, period));
+            if (period === 'ft') content.append(ui('p', 'tw-m-0 tw-px-3 tw-py-2 tw-text-xs tw-text-slate-500', 'DraftKings cuenta una sola vez (ESPN prioritario); FOX es referencia sin casa identificada. Spread/Total FULL_TIME de Flashscore no se equiparan a FULL_TIME_OVER_TIME.'));
             if (period === 'h1') content.append(ui('p', 'tw-m-0 tw-px-3 tw-py-2 tw-text-xs tw-text-slate-500',
-                'H1 = primera mitad. Se comparan tres casas distintas de FlashscoreUSA. El Moneyline H1 de tres resultados no equivale al de dos; solo se compara si Rover publica esa línea.'));
+                'H1: DraftKings, bet365.us y BetMGM.us (FlashscoreUSA · catálogo NJ). Moneyline solo se compara si Rover publica esa línea.'));
         };
         for (const period of periods) {
             const count = group.flags.filter(f => periodOf(f.field) === period && ['confirmed','review'].includes(f.level)).length;
@@ -980,7 +1006,7 @@
     }
 
     function makeMarketTable(group, period) {
-        const keys = period === 'h1' ? ['flash','bwin','wh'] : ['espn','flash','fox'];
+        const keys = SOURCE_KEYS[period];
         const scroll = ui('div', 'tw-overflow-x-auto');
         const table = ui('table', 'tw-w-full tw-border-collapse tw-text-xs tw-tabular-nums tw-text-left');
         table.setAttribute('aria-label', 'Mercados discrepantes de ' + group.teams.map(t => t.name).join(' vs. '));
@@ -1006,6 +1032,8 @@
             for (const key of keys) {
                 const entry = flag.entries.find(e => e.source === key);
                 const cell = ui('td', 'tw-px-3 tw-py-2 tw-whitespace-nowrap ' + (entry?.exceeds ? 'tw-font-semibold ' + tones[flag.level].value : 'tw-text-slate-700'), displayValue(flag.field, entry?.value));
+                if (entry?.duplicate) cell.append(ui('div', 'tw-text-xs tw-font-normal tw-text-slate-500', 'Misma casa · no cuenta'));
+                else if (key === 'fox' && entry) cell.append(ui('div', 'tw-text-xs tw-font-normal tw-text-slate-500', 'Referencia'));
                 if (entry?.exceeds) {
                     cell.append(ui('div', 'tw-text-xs tw-font-normal', 'Δ ' + (entry.delta > 0 ? '+' : '') + Number(entry.delta.toFixed(2))));
                     cell.title = 'Diferencia respecto a Rover';
@@ -1222,7 +1250,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.6'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.7'));
     title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT + H1 · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
