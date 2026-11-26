@@ -200,3 +200,43 @@ test('Firefox: notificación amarilla sin repetición, escalamiento rojo, persis
     assert.equal(await host.locator('dialog').isVisible(),false);
   }finally{await browser.close();}
 });
+
+
+test('Firefox: no launcher during loading; same size and alignment as native sports buttons across refresh', async () => {
+  const browser=await firefox.launch({headless:true});
+  try {
+    const page=await browser.newPage({viewport:{width:900,height:800}});
+    const initial='<style>.goToButtons{display:flex;justify-content:center;align-items:stretch;flex-wrap:wrap;margin:20px}.goTo{box-sizing:border-box;width:90px;height:34px;margin:4px;padding:5px 8px;border:1px solid #30363d;border-radius:3px;font:600 13px/20px Arial}</style><div id="logros"><p>Cargando líneas...</p></div>';
+    await page.route('https://roversport.net/**',route=>route.fulfill({contentType:'text/html',body:initial}));
+    await page.goto('https://roversport.net/old.php');
+    await page.evaluate(()=>{window.GM_getResourceText=()=> '{}';window.GM_notification=()=>{};window.GM_xmlhttpRequest=()=>{throw Error('Unexpected network')};});
+    const marker='    let renderScheduled = false;';
+    const setup=built.replace(marker,'state.lastStarted=Date.now();\n'+marker);
+    await page.addScriptTag({content:setup});
+    assert.equal(await page.locator('#rs-vl-launcher').count(),0);
+    const menu='<div class="goToButtons"><button class="goTo btn btn-dark" goto="baloncesto">BASKETBALL</button><button class="goTo btn btn-dark" goto="futbol">SOCCER</button></div>';
+    await page.evaluate(html=>{document.querySelector('#logros').innerHTML=html},menu);
+    await page.locator('button[goto="futbol"] + #rs-vl-launcher').waitFor();
+    const measure=()=>page.evaluate(()=>{
+      const a=document.querySelector('button[goto="futbol"]'),b=document.querySelector('#rs-vl-launcher');
+      const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();
+      return {x:[x.width,x.height,x.top],y:[y.width,y.height,y.top],color:getComputedStyle(b).backgroundColor,margin:getComputedStyle(b).margin};
+    });
+    let dims=await measure();
+    assert.deepEqual(dims.x,dims.y);
+    assert.deepEqual(dims.y.slice(0,2),[90,34]);
+    assert.equal(dims.color,'rgb(219, 234, 254)');
+    assert.equal(dims.margin,'4px');
+    await page.evaluate(()=>{document.querySelector('#logros').innerHTML='<p>Actualizando...</p>'});
+    await page.waitForFunction(()=>!document.querySelector('#rs-vl-launcher'));
+    await page.evaluate(html=>{document.querySelector('#logros').innerHTML=html},menu);
+    await page.locator('button[goto="futbol"] + #rs-vl-launcher').waitFor();
+    assert.equal(await page.locator('#rs-vl-launcher').count(),1);
+    dims=await measure();assert.deepEqual(dims.x,dims.y);
+    await page.evaluate(()=>{const style=document.createElement('style');style.textContent='.goTo{width:104px;height:38px}';document.head.append(style)});
+    await page.waitForFunction(()=>document.querySelector('#rs-vl-launcher').getBoundingClientRect().height===38);
+    dims=await measure();assert.deepEqual(dims.x,dims.y);
+    await page.locator('#rs-vl-launcher').click();
+    assert.equal(await page.locator('#rs-vl-host').locator('dialog').isVisible(),true);
+  } finally {await browser.close();}
+});
