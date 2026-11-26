@@ -240,3 +240,72 @@ test('Firefox: no launcher during loading; same size and alignment as native spo
     assert.equal(await page.locator('#rs-vl-host').locator('dialog').isVisible(),true);
   } finally {await browser.close();}
 });
+
+
+test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover moneyline, notifications and threshold', async () => {
+  const browser=await firefox.launch({headless:true});
+  try {
+    const page=await browser.newPage({viewport:{width:1000,height:800}});
+    const halfFixture=fixture.replace('<td>Spread</td></tr>','<td>Spread</td><td>H1</td></tr>')
+      .replace('<xs>140.5</xs><xs>-4.5</xs></td></tr>','<xs>140.5</xs><xs>-4.5</xs></td><td><xs>65.5</xs><xs>-2.5</xs></td></tr>')
+      .replace('<xs>-2.5</xs><xs>159.5</xs></td></tr>','<xs>-2.5</xs><xs>159.5</xs></td><td><xs>-0.5</xs><xs>74.5</xs></td></tr>');
+    await page.route('https://roversport.net/**',route=>route.fulfill({contentType:'text/html',body:halfFixture}));
+    await page.goto('https://roversport.net/old.php');
+    await page.evaluate(()=>{window.GM_getResourceText=()=> '{}';window.notices=[];window.GM_notification=n=>window.notices.push(n);window.GM_xmlhttpRequest=()=>{throw Error('Unexpected network')};});
+    const marker='    let renderScheduled = false;';
+    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,parseFlashOdds,asHalf,flipOdds,inversionViews,notifyAlerts,roverHalfSpread}; state.lastStarted=Date.now();\n'+marker);
+    await page.addScriptTag({content:setup});
+    const data=await page.evaluate(()=>{
+      const {state,render,readRover,assessAll,parseFlashOdds,asHalf,flipOdds,inversionViews,roverHalfSpread}=window.testUI;
+      const rows=readRover(true), row=rows[0], rover=row.odds, now=Date.now();
+      const odds=(scope,spread,total,book=16,mlType='HOME_AWAY')=>[
+        {bookmakerId:book,bettingScope:scope,bettingType:'ASIAN_HANDICAP',odds:[{active:true,value:'1.91',eventParticipantId:'A',handicap:{value:String(spread)}},{active:true,value:'1.91',eventParticipantId:'B',handicap:{value:String(-spread)}}]},
+        {bookmakerId:book,bettingScope:scope,bettingType:'OVER_UNDER',odds:[{active:true,value:'1.91',selection:'OVER',handicap:{value:String(total)}},{active:true,value:'1.91',selection:'UNDER',handicap:{value:String(total)}}]},
+        {bookmakerId:book,bettingScope:scope,bettingType:mlType,odds:[{active:true,value:scope==='FIRST_HALF'?'1.6':'2.8',eventParticipantId:'A'},{active:true,value:scope==='FIRST_HALF'?'2.4':'1.45454545',eventParticipantId:'B'}]}
+      ];
+      const payload={data:{findOddsByEventId:{settings:{bookmakers:[{bookmaker:{id:16,name:'bet365'}},{bookmaker:{id:20,name:'bwin'}},{bookmaker:{id:30,name:'William Hill'}}]},odds:[
+        ...odds('FULL_TIME_OVER_TIME',4.5,140.5),
+        ...odds('FIRST_HALF',-2.5,66.5),
+        ...odds('FIRST_HALF',-2.5,66.5,20),
+        ...odds('FIRST_HALF',2.5,65.5,30,'HOME_DRAW_AWAY'),
+        ...odds('FULL_TIME_OVER_TIME',-10,100,30)
+      ]}}};
+      const ft=parseFlashOdds(payload,['A','B']), half=parseFlashOdds(payload,['A','B'],'FIRST_HALF');
+      const bwin=parseFlashOdds(payload,['A','B'],'FIRST_HALF','bwin'), wh=parseFlashOdds(payload,['A','B'],'FIRST_HALF','William Hill');
+      const quotes={espn:{odds:{spread:4.5,total:140.5,money0:180,money1:-220}},flash:{odds:{...ft,...asHalf(half)}},bwin:{odds:asHalf(bwin)},wh:{odds:asHalf(wh)}};
+      const record={scheduledAt:now+3600000,teams:row.teams,rover,quotes,findings:assessAll(row,quotes)};
+      const one=assessAll(row,{espn:quotes.espn,flash:quotes.flash});
+      const normal=assessAll(row,{flash:{odds:{h1spread:2.5,h1total:65.9}},bwin:{odds:{h1spread:2.5,h1total:65.9}}});
+      state.current.set(row.id,record);state.checkedAt=now;render();
+      return {rover,second:rows[1].odds,ft,half,bwin,wh,findings:record.findings,inversions:inversionViews(record),one,normal,empty:roverHalfSpread(['',''])};
+    });
+    assert.equal(data.rover.h1spread,2.5);assert.equal(data.rover.h1total,65.5);
+    assert.equal(data.rover.h1money0,null);assert.equal(data.second.h1spread,-0.5);
+    assert.equal(data.ft.spread,4.5);assert.equal(data.half.spread,-2.5);
+    assert.equal(data.half.total,66.5);assert.equal(data.wh.money0,null);assert.equal(data.wh.spread,2.5);assert.equal(data.bwin.spread,-2.5);
+    assert.equal(data.empty.spread,null);
+    assert.equal(data.findings.find(f=>f.field==='spread').level,'ok');
+    assert.equal(data.findings.find(f=>f.field==='h1spread').level,'confirmed');
+    assert.equal(data.findings.find(f=>f.field==='h1total').level,'confirmed');
+    assert.equal(data.findings.find(f=>f.field==='h1money0').level,'unavailable');
+    assert.equal(data.findings.find(f=>f.field==='h1money0').entries.length,2);
+    assert.equal(data.one.find(f=>f.field==='h1spread').level,'review');
+    assert.equal(data.normal.find(f=>f.field==='h1total').level,'ok');
+    assert.equal(data.inversions.length,1);assert.equal(data.inversions[0].period,'h1');
+    const host=page.locator('#rs-vl-host');
+    await page.locator('#rs-vl-launcher').click();
+    await host.locator('details[data-event-id="1"] > summary').click();
+    const article=host.locator('article[data-event-id="1"]');
+    await article.waitFor();
+    assert.equal(await article.locator('[data-period-tab="h1"]').getAttribute('aria-pressed'),'true');
+    assert.equal(await article.locator('[data-inversion="spread"][data-period="h1"]').count(),1);
+    assert.ok((await article.innerText()).includes('Sin línea en Rover'));
+    assert.ok((await article.innerText()).includes('William Hill'));
+    await article.locator('[data-period-tab="ft"]').click();
+    assert.equal(await article.locator('[data-inversion]').count(),0);
+    assert.ok((await article.innerText()).includes('FOX Sports'));
+    await page.evaluate(()=>{const {state,notifyAlerts}=window.testUI;const record=state.current.get('1');record.roverId='1';notifyAlerts([{record,item:record.findings.find(f=>f.field==='h1spread')}]);window.notices.at(-1).onclick()});
+    assert.equal(await article.locator('[data-period-tab="h1"]').getAttribute('aria-pressed'),'true');
+    assert.ok(await page.evaluate(()=>window.notices.at(-1).text.includes('Spread H1')));
+  }finally{await browser.close();}
+});

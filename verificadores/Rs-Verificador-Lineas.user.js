@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.5
-// @description  Verifica Spread, Total y Moneyline FT pregame de NCAAB en Rover y exporta las líneas a Excel.
+// @version      0.0.6
+// @description  Verifica Spread, Total y Moneyline FT/H1 pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
 // @match        https://www.roversport.net/old.php*
@@ -38,14 +38,27 @@
         spread: { label: 'Spread', threshold: 2 },
         total: { label: 'Total', threshold: 2 },
         money0: { label: 'ML equipo 1', threshold: 20 },
-        money1: { label: 'ML equipo 2', threshold: 20 }
+        money1: { label: 'ML equipo 2', threshold: 20 },
+        h1spread: { label: 'H1 Spread', threshold: 1 },
+        h1total: { label: 'H1 Total', threshold: 1 },
+        h1money0: { label: 'H1 ML equipo 1', threshold: 20 },
+        h1money1: { label: 'H1 ML equipo 2', threshold: 20 }
     };
     const SOURCES = {
         espn: 'ESPN / DraftKings',
         flash: 'FlashscoreUSA / bet365',
-        fox: 'FOX Sports'
+        fox: 'FOX Sports',
+        bwin: 'FlashscoreUSA / bwin',
+        wh: 'FlashscoreUSA / William Hill'
     };
     const FIELDS = Object.keys(MARKETS);
+    const FT_FIELDS = FIELDS.filter(field => !field.startsWith('h1'));
+    const periodOf = field => field.startsWith('h1') ? 'h1' : 'ft';
+    const baseField = field => field.replace(/^h1/, '');
+    const scopedOdds = (odds, period) => Object.fromEntries(FT_FIELDS.map(field => [
+        field, odds?.[(period === 'h1' ? 'h1' : '') + field]
+    ]));
+    const asHalf = odds => Object.fromEntries(FT_FIELDS.map(field => ['h1' + field, odds?.[field] ?? null]));
     const DATE_FORMAT = new Intl.DateTimeFormat('en-CA', {
         timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit'
     });
@@ -150,6 +163,16 @@
         return { total: total?.value ?? null, spread: candidate ? candidate.value * (candidate.index === 0 ? 1 : -1) : null };
     }
 
+    function roverHalfSpread(values) {
+        const totals = values.map((value, index) => ({ index, value: number(value) }))
+            .filter(({index, value}) => isNumber(value) && value >= 35 && value <= 125 && !/^[+-]/.test(signs(values[index])));
+        if (totals.length !== 1) return {spread: null, total: null};
+        const {index, value: total} = totals[0];
+        const other = values.length === 2 ? line(values[1-index]) : null;
+        const spread = within(other, 40) ? other * (index === 0 ? -1 : 1) : null;
+        return {spread, total};
+    }
+
     function readRover(visibleOnly) {
         const events = [];
         for (const table of document.querySelectorAll('#logros table')) {
@@ -176,6 +199,13 @@
                         money0: validMoney(money(visiblePrice(row, headers.indexOf('ML'))[0])),
                         money1: validMoney(money(visiblePrice(row, headers.indexOf('ML'))[1]))
                     };
+                    const halfIndex = headers.findIndex(header => /^(?:H1|1H)$/i.test(header));
+                    const halfML = headers.findIndex(header => /^(?:H1\s+ML|ML\s+H1|1H\s+ML|ML\s+1H)$/i.test(header));
+                    if (halfIndex >= 0 || halfML >= 0) {
+                        const half = roverHalfSpread(visiblePrice(row, halfIndex));
+                        const halfMoney = visiblePrice(row, halfML);
+                        Object.assign(odds, asHalf({...half, money0: validMoney(money(halfMoney[0])), money1: validMoney(money(halfMoney[1]))}));
+                    }
                     const raw = Object.fromEntries(headers.slice(2).flatMap((header, index) => {
                         const prices = visiblePrice(row, index + 2);
                         return prices.some(Boolean) ? [[header || `Columna ${index + 3}`, prices.join(' / ')]] : [];
@@ -317,27 +347,27 @@
         };
     }
 
-    function bestBalancedPair(first, second, inverse = false) {
+    function bestBalancedPair(first, second, inverse = false, wholeHalfOnly = false) {
         const pairs = first.flatMap(a => second.flatMap(b => {
             const x = number(a.handicap?.value);
             const y = number(b.handicap?.value);
             const p = number(a.value);
             const q = number(b.value);
-            if (x === null || y === null || p === null || q === null || p <= 1 || q <= 1 || x !== (inverse ? -y : y)) return [];
+            if (x === null || y === null || p === null || q === null || p <= 1 || q <= 1 || x !== (inverse ? -y : y) || (wholeHalfOnly && !Number.isInteger(x * 2))) return [];
             return [{ line: x, balance: Math.abs(1 / p - 1 / q) }];
         }));
         pairs.sort((a, b) => a.balance - b.balance || Math.abs(a.line) - Math.abs(b.line) || a.line - b.line);
         return pairs[0]?.line ?? null;
     }
 
-    function parseFlashOdds(payload, participants) {
+    function parseFlashOdds(payload, participants, scope = 'FULL_TIME_OVER_TIME', bookmakerName = 'bet365') {
         const root = payload?.data?.findOddsByEventId;
         if (!root) throw new Error('Flashscore no devolvió el evento');
         if (participants.some(id => !id) || participants[0] === participants[1]) return {};
-        const bet365 = root.settings?.bookmakers?.find(item => normalized(item.bookmaker?.name) === 'bet365')?.bookmaker?.id;
-        if (bet365 == null) return {};
-        const entries = (root.odds ?? []).filter(entry => entry.bookmakerId === bet365
-            && entry.bettingScope === 'FULL_TIME_OVER_TIME');
+        const bookmakerId = root.settings?.bookmakers?.find(item => normalized(item.bookmaker?.name) === normalized(bookmakerName))?.bookmaker?.id;
+        if (bookmakerId == null) return {};
+        const entries = (root.odds ?? []).filter(entry => String(entry.bookmakerId) === String(bookmakerId)
+            && entry.bettingScope === scope);
         const active = type => entries.filter(entry => entry.bettingType === type)
             .flatMap(entry => entry.odds ?? []).filter(selection => selection.active === true);
         const byTeam = (items, side) => items.filter(item => item.eventParticipantId === participants[side]);
@@ -349,8 +379,8 @@
             return prices.length === 1 ? prices[0] : null;
         };
         return {
-            spread: bestBalancedPair(byTeam(spread, 0), byTeam(spread, 1), true),
-            total: bestBalancedPair(total.filter(item => item.selection === 'OVER'), total.filter(item => item.selection === 'UNDER')),
+            spread: bestBalancedPair(byTeam(spread, 0), byTeam(spread, 1), true, scope === 'FIRST_HALF'),
+            total: bestBalancedPair(total.filter(item => item.selection === 'OVER'), total.filter(item => item.selection === 'UNDER'), false, scope === 'FIRST_HALF'),
             money0: moneyFor(0), money1: moneyFor(1)
         };
     }
@@ -361,7 +391,11 @@
         });
         const payload = await request(`https://global.ds.lsapp.eu/odds/pq_graphql?${params}`);
         const teams = match.order.map(index => match.event.teams[index].id);
-        return parseFlashOdds(payload, teams);
+        return {
+            flash: {id: match.event.id, odds: {...parseFlashOdds(payload, teams), ...asHalf(parseFlashOdds(payload, teams, 'FIRST_HALF'))}},
+            bwin: {id: match.event.id, odds: asHalf(parseFlashOdds(payload, teams, 'FIRST_HALF', 'bwin'))},
+            wh: {id: match.event.id, odds: asHalf(parseFlashOdds(payload, teams, 'FIRST_HALF', 'William Hill'))}
+        };
     }
 
     async function loadFox() {
@@ -400,14 +434,18 @@
     function assess(field, rover, sources) {
         const rv = rover[field];
         const market = MARKETS[field];
-        const moneyline = field.startsWith('money');
-        const entries = Object.entries(sources).flatMap(([source, { odds }]) => {
+        const base = baseField(field);
+        const period = periodOf(field);
+        const moneyline = base.startsWith('money');
+        const allowed = period === 'h1' ? ['flash','bwin','wh'] : ['espn','flash','fox'];
+        const entries = Object.entries(sources).filter(([source]) => allowed.includes(source)).flatMap(([source, { odds }]) => {
             const value = odds[field];
-            if (!isNumber(rv) || !isNumber(value)) return [];
+            if (!isNumber(value) || (period === 'ft' && !isNumber(rv))) return [];
+            if (!isNumber(rv)) return [{source, value, delta: null, reversed: false, exceeds: false}];
             const delta = moneyline ? americanDistance(value) - americanDistance(rv) : value - rv;
-            const reversed = field === 'spread'
+            const reversed = base === 'spread'
                 ? Math.sign(value) * Math.sign(rv) === -1
-                : moneyline && favorite(rover) * favorite(odds) === -1;
+                : moneyline && favorite(scopedOdds(rover, period)) * favorite(scopedOdds(odds, period)) === -1;
             return [{ source, value, delta, reversed, exceeds: reversed || Math.abs(delta) >= market.threshold }];
         });
         const outliers = entries.filter(entry => entry.exceeds);
@@ -415,14 +453,14 @@
             .find(group => group.length >= 2);
         return {
             field, rover: rv, entries,
-            level: confirmed ? 'confirmed' : outliers.length ? 'review' : entries.length >= 2 ? 'ok' : 'missing',
+            level: period === 'h1' && !isNumber(rv) ? 'unavailable' : confirmed ? 'confirmed' : outliers.length ? 'review' : entries.length >= 2 ? 'ok' : 'missing',
             sign: confirmed ? Math.sign(confirmed[0].delta) : 0,
             reversed: Boolean(confirmed?.some(entry => entry.reversed) ?? outliers.some(entry => entry.reversed))
         };
     }
 
     function assessAll(row, quotes) {
-        return FIELDS.map(field => assess(field, row.odds, quotes));
+        return FIELDS.filter(field => periodOf(field) === 'ft' || Object.hasOwn(row.odds, field)).map(field => assess(field, row.odds, quotes));
     }
 
     async function mapWithLimit(items, limit, task) {
@@ -475,7 +513,7 @@
         return Object.fromEntries(record.findings.flatMap(item => {
             const now = record.observedAt;
             const old = previous?.incidents?.[item.field];
-            if (item.level === 'missing') return old ? [[item.field, old]] : [];
+            if (item.level === 'missing' || item.level === 'unavailable') return old ? [[item.field, old]] : [];
             if (item.level === 'ok') {
                 return old ? [[item.field, { ...old, resolvedAt: old.resolvedAt || now }]] : [];
             }
@@ -572,13 +610,13 @@
                 if (espn) quotes.espn = { id: espn.event.id, odds: flipOdds(espn.event.odds, espn.order) };
                 if (flash) {
                     try {
-                        quotes.flash = { id: flash.event.id, odds: await flashQuote(flash) };
+                        Object.assign(quotes, await flashQuote(flash));
                     } catch (error) {
                         console.warn('[Verificador de Lineas] Flashscore', flash.event.id, error);
                     }
                 }
                 let findings = assessAll(row, quotes);
-                if (findings.some(item => isNumber(item.rover) && ['review', 'missing'].includes(item.level))) {
+                if (findings.some(item => periodOf(item.field) === 'ft' && isNumber(item.rover) && ['review', 'missing'].includes(item.level))) {
                     context.fox ??= row.profile.fox().catch(error => {
                         foxUnavailable = true;
                         console.warn('[Verificador de Lineas] FOX', error);
@@ -672,6 +710,7 @@
                         window.focus();
                         activeFilter = level;
                         expandedEvents.add(first.record.roverId);
+                        selectedPeriods.set(first.record.roverId, periodOf(first.items[0].field));
                         openModal();
                         const target = [...alertList.children].find(el => el.dataset.eventId === first.record.roverId);
                         if (target) { target.open = true; target.scrollIntoView({block:'nearest'}); }
@@ -697,11 +736,12 @@
 
     function displayValue(field, value) {
         if (!isNumber(value)) return '—';
-        if (field === 'total') return String(value);
+        if (baseField(field) === 'total') return String(value);
         return value > 0 ? '+' + value : String(value);
     }
 
     const tones = {
+        unavailable: { label: 'Sin línea en Rover', pill: 'tw-bg-slate-100 tw-text-slate-600', line: 'tw-border-slate-200', value: 'tw-text-slate-600' },
         ok: { label: 'Sin discrepancias', pill: 'tw-bg-slate-100 tw-text-emerald-700', line: 'tw-border-slate-200', value: 'tw-text-emerald-700' },
         missing: { label: 'Datos incompletos', pill: 'tw-bg-slate-100 tw-text-slate-600', line: 'tw-border-slate-200', value: 'tw-text-slate-600' },
         pending: { label: 'Sin verificar', pill: 'tw-bg-slate-100 tw-text-slate-600', line: 'tw-border-slate-200', value: 'tw-text-slate-600' },
@@ -751,20 +791,23 @@
     }
 
     function marketLabel(field, teams) {
-        if (field === 'money0' || field === 'money1') return 'ML · ' + teams[field === 'money0' ? 0 : 1].name;
-        if (field === 'spread') return 'Spread · ' + teams[0].name;
-        return 'Total FT';
+        const base = baseField(field), period = periodOf(field) === 'h1' ? 'H1' : 'FT';
+        const suffix = period === 'H1' ? ' H1' : '';
+        if (base === 'money0' || base === 'money1') return 'ML' + suffix + ' · ' + teams[base === 'money0' ? 0 : 1].name;
+        if (base === 'spread') return 'Spread' + suffix + ' · ' + teams[0].name;
+        return 'Total ' + period;
     }
 
     // Presentation-only: a confirmed discrepancy need not mean a confirmed reversal.
     function inversionViews(record) {
         const views = [];
-        for (const kind of ['spread', 'money']) {
+        for (const period of ['ft', 'h1']) for (const kind of ['spread', 'money']) {
+            const rover = scopedOdds(record.rover, period);
             const flags = record.findings.filter(f => ['confirmed', 'review'].includes(f.level)
-                && (kind === 'spread' ? f.field === 'spread' : f.field.startsWith('money')));
+                && periodOf(f.field) === period && (kind === 'spread' ? baseField(f.field) === 'spread' : baseField(f.field).startsWith('money')));
             const original = kind === 'spread'
-                ? (isNumber(record.rover.spread) ? Math.sign(record.rover.spread) : 0)
-                : favorite(record.rover);
+                ? (isNumber(rover.spread) ? Math.sign(rover.spread) : 0)
+                : favorite(rover);
             if (!original) continue;
             const before = original < 0 ? 0 : 1, after = 1 - before;
             const evidence = [];
@@ -773,8 +816,9 @@
             for (const source of Object.keys(SOURCES)) {
                 const matching = flags.flatMap(f => f.entries.filter(e => e.source === source && e.reversed && e.exceeds));
                 if (!matching.length) continue;
-                const odds = record.quotes?.[source]?.odds;
-                if (!odds) continue;
+                const rawOdds = record.quotes?.[source]?.odds;
+                if (!rawOdds) continue;
+                const odds = scopedOdds(rawOdds, period);
                 const sign = kind === 'spread'
                     ? (isNumber(odds.spread) ? Math.sign(odds.spread) : 0)
                     : favorite(odds);
@@ -782,14 +826,14 @@
                 const value = kind === 'spread' ? (after === 0 ? odds.spread : -odds.spread) : odds['money' + after];
                 if (!isNumber(value)) continue;
                 evidence.push({ source, value, reference: kind === 'spread' ? odds.spread : null,
-                    delta: kind === 'spread' ? Math.abs(odds.spread - record.rover.spread) : null });
+                    delta: kind === 'spread' ? Math.abs(odds.spread - rover.spread) : null });
             }
             if (!evidence.length) continue;
             const value = kind === 'spread'
-                ? (before === 0 ? record.rover.spread : -record.rover.spread)
-                : record.rover['money' + before];
+                ? (before === 0 ? rover.spread : -rover.spread)
+                : rover['money' + before];
             if (!isNumber(value)) continue;
-            views.push({ kind, before, after, value, reference: kind === 'spread' ? record.rover.spread : null,
+            views.push({ kind, period, before, after, value, reference: kind === 'spread' ? rover.spread : null,
                 level: confirmed && evidence.length >= 2 ? 'confirmed' : 'review', evidence });
         }
         return views;
@@ -859,10 +903,11 @@
         const tone = tones[view.level], field = view.kind === 'spread' ? 'spread' : 'money0';
         const block = ui('section', 'tw-m-0 tw-p-3 tw-border-b tw-border-slate-200 tw-bg-white');
         block.dataset.inversion = view.kind;
+        block.dataset.period = view.period;
         block.dataset.level = view.level;
         const heading = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2');
         heading.append(ui('strong', 'tw-text-sm tw-font-bold ' + tone.value,
-            'Favorito invertido · ' + (view.kind === 'spread' ? 'Spread FT' : 'Moneyline FT')), badge(view.level));
+            'Favorito invertido · ' + (view.kind === 'spread' ? 'Spread ' : 'Moneyline ') + view.period.toUpperCase()), badge(view.level));
         block.append(heading);
         const pair = ui('div', 'tw-mt-2 tw-grid tw-grid-cols-2 tw-gap-2');
         const values = [...new Set(view.evidence.map(e => e.value))];
@@ -905,13 +950,43 @@
             card.append(ui('p', 'tw-m-0 tw-px-3 tw-py-3 tw-text-sm tw-text-blue-800', group.level === 'stale' ? 'La línea de Rover cambió después de la última consulta. Pendiente de verificar.' : 'Todavía no hay resultados de verificación para este evento.'));
             return card;
         }
-        for (const view of group.inversions || []) card.append(makeInversion(group, view));
+        const periods = ['ft','h1'].filter(period => group.flags.some(flag => periodOf(flag.field) === period));
+        const tabs = ui('div', 'tw-flex tw-flex-wrap tw-gap-2 tw-px-3 tw-py-2 tw-border-b tw-border-slate-200');
+        const content = ui('div', '');
+        let selected = selectedPeriods.get(group.id);
+        if (!periods.includes(selected)) selected = periods.find(p => group.flags.some(f => periodOf(f.field) === p && ['confirmed','review'].includes(f.level))) || periods[0];
+        const buttons = {};
+        const show = period => {
+            selectedPeriods.set(group.id, period);
+            for (const [key, button] of Object.entries(buttons)) button.setAttribute('aria-pressed', String(key === period));
+            content.replaceChildren();
+            for (const view of group.inversions || []) if (view.period === period) content.append(makeInversion(group, view));
+            content.append(makeMarketTable(group, period));
+            if (period === 'h1') content.append(ui('p', 'tw-m-0 tw-px-3 tw-py-2 tw-text-xs tw-text-slate-500',
+                'H1 = primera mitad. Se comparan tres casas distintas de FlashscoreUSA. El Moneyline H1 de tres resultados no equivale al de dos; solo se compara si Rover publica esa línea.'));
+        };
+        for (const period of periods) {
+            const count = group.flags.filter(f => periodOf(f.field) === period && ['confirmed','review'].includes(f.level)).length;
+            const button = ui('button', 'tw-rounded-md tw-border tw-border-slate-200 tw-bg-white tw-px-3 tw-py-2 tw-text-xs tw-font-semibold tw-text-slate-700 tw-cursor-pointer',
+                (period === 'ft' ? 'Full Time (FT)' : 'Half Time (H1)') + (count ? ' · ' + count : ''));
+            button.type = 'button'; button.dataset.periodTab = period;
+            button.addEventListener('click', () => show(period));
+            buttons[period] = button; tabs.append(button);
+        }
+        if (periods.length > 1) card.append(tabs);
+        card.append(content);
+        show(selected);
+        return card;
+    }
+
+    function makeMarketTable(group, period) {
+        const keys = period === 'h1' ? ['flash','bwin','wh'] : ['espn','flash','fox'];
         const scroll = ui('div', 'tw-overflow-x-auto');
         const table = ui('table', 'tw-w-full tw-border-collapse tw-text-xs tw-tabular-nums tw-text-left');
         table.setAttribute('aria-label', 'Mercados discrepantes de ' + group.teams.map(t => t.name).join(' vs. '));
         const head = ui('thead', 'tw-bg-white tw-text-slate-500');
         const hr = ui('tr', 'tw-border-b tw-border-slate-200');
-        for (const [main, sub] of [['Mercado',''],['Rover','Actual'],['ESPN','DraftKings'],['Flashscore','bet365'],['FOX Sports','']]) {
+        for (const [main, sub] of [['Mercado',''],['Rover','Actual'],...keys.map(key => SOURCES[key].split(' / '))]) {
             const th = ui('th', 'tw-px-3 tw-py-2 tw-font-semibold tw-whitespace-nowrap', main);
             th.scope = 'col';
             if (sub) th.append(ui('div', 'tw-font-normal tw-text-slate-500', sub));
@@ -919,7 +994,7 @@
         }
         head.append(hr); table.append(head);
         const body = ui('tbody', 'tw-divide-y tw-divide-slate-100');
-        for (const flag of group.flags) {
+        for (const flag of group.flags.filter(flag => periodOf(flag.field) === period)) {
             const tr = ui('tr', 'tw-align-top');
             const market = ui('td', 'tw-px-3 tw-py-2 tw-min-w-36 tw-text-slate-800');
             market.append(ui('div', 'tw-font-medium', marketLabel(flag.field, group.teams)), badge(flag.level));
@@ -928,7 +1003,7 @@
             const prior = group.previous?.[flag.field];
             if (isNumber(prior) && prior !== flag.rover) rv.append(ui('div', 'tw-font-normal tw-text-slate-500', 'Antes: ' + displayValue(flag.field, prior)));
             tr.append(market, rv);
-            for (const key of Object.keys(SOURCES)) {
+            for (const key of keys) {
                 const entry = flag.entries.find(e => e.source === key);
                 const cell = ui('td', 'tw-px-3 tw-py-2 tw-whitespace-nowrap ' + (entry?.exceeds ? 'tw-font-semibold ' + tones[flag.level].value : 'tw-text-slate-700'), displayValue(flag.field, entry?.value));
                 if (entry?.exceeds) {
@@ -939,8 +1014,8 @@
             }
             body.append(tr);
         }
-        table.append(body); scroll.append(table); card.append(scroll);
-        return card;
+        table.append(body); scroll.append(table);
+        return scroll;
     }
 
     function makeEvent(group) {
@@ -997,7 +1072,7 @@
             button.textContent = filterNames[key] + ' (' + n + ')';
             button.setAttribute('aria-pressed', String(activeFilter === key));
         }
-        const signature = JSON.stringify([activeFilter, groups, [...expandedEvents]]);
+        const signature = JSON.stringify([activeFilter, groups, [...expandedEvents], [...selectedPeriods]]);
         if (signature === lastView) return;
         lastView = signature;
         const shown = groups.filter(g => matchesFilter(g, activeFilter));
@@ -1052,7 +1127,7 @@
                             item.entries.find(entry => entry.source === source)?.value ?? '')]))
             ]);
             appendSheet(book, 'Fuentes', [
-                ['Observación NY', 'Rover ID', 'Equipo 1', 'Equipo 2', 'Fuente', 'ID fuente', 'Spread equipo 1', 'Total', 'ML equipo 1', 'ML equipo 2'],
+                ['Observación NY', 'Rover ID', 'Equipo 1', 'Equipo 2', 'Fuente', 'ID fuente', 'FT Spread equipo 1', 'FT Total', 'FT ML equipo 1', 'FT ML equipo 2', 'H1 Spread equipo 1', 'H1 Total', 'H1 ML equipo 1', 'H1 ML equipo 2'],
                 ...current.flatMap(record => Object.entries(record.quotes).map(([source, quote]) => [
                     timeLabel(record.observedAt), record.roverId, ...record.teams.map(team => team.name),
                     SOURCES[source], quote.id, ...FIELDS.map(field => quote.odds[field] ?? '')
@@ -1067,7 +1142,7 @@
                     timeLabel(record.observedAt), timeLabel(record.scheduledAt), record.roverId,
                     ...record.teams.map(team => team.name), MARKETS[item.field].label,
                     record.previous?.[item.field] ?? '', item.rover ?? '',
-                    { confirmed: 'Confirmada', review: 'Por revisar', ok: 'Dentro del umbral', missing: 'Datos incompletos' }[item.level],
+                    { confirmed: 'Confirmada', review: 'Por revisar', ok: 'Dentro del umbral', missing: 'Datos incompletos', unavailable: 'Sin línea en Rover' }[item.level],
                     timeLabel(incident?.startedAt), incident?.sources.map(source => SOURCES[source]).join(' / ') ?? '',
                     timeLabel(incident?.confirmedAt), timeLabel(incident?.resolvedAt),
                     incident ? Math.round(((incident.resolvedAt || record.observedAt) - incident.startedAt) / MINUTE) : '',
@@ -1147,9 +1222,9 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.5'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.6'));
     title.firstChild.id = 'rs-vl-title';
-    heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT · Pregame · Cada 5 min'));
+    heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT + H1 · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     const buttonBase = 'tw-inline-flex tw-items-center tw-justify-center tw-gap-2 tw-rounded-lg tw-border tw-px-3 tw-py-2 tw-text-sm tw-font-semibold tw-cursor-pointer tw-transition-colors disabled:tw-opacity-50 disabled:tw-cursor-not-allowed';
     const runButton = ui('button', buttonBase + ' tw-border-slate-900 tw-bg-slate-900 tw-text-white hover:tw-bg-slate-700', 'Verificar ahora');
@@ -1198,6 +1273,7 @@
     const filterButtons = {};
     let activeFilter = 'all', lastView = '';
     const expandedEvents = new Set();
+    const selectedPeriods = new Map();
     for (const [key, label] of Object.entries(filterNames)) {
         const b = ui('button','tw-rounded-md tw-border tw-border-slate-200 tw-bg-white tw-px-2 tw-py-1 tw-text-xs tw-font-medium tw-text-slate-700 tw-cursor-pointer hover:tw-bg-slate-100',label);
         b.type = 'button'; b.setAttribute('aria-pressed',String(key === activeFilter));
