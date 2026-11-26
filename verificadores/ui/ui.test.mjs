@@ -29,7 +29,7 @@ test('Firefox: grouped markets, current vs prior, filters, isolation and rebuilt
       const now=Date.now();
       state.checkedAt=now;
       state.current.set('1',{scheduledAt:now+3600000,teams:rows[0].teams,rover:rows[0].odds,previous:{money1:-205},findings:[
-        f('money1',-220,'review',[['espn',-220,0,false],['flashUs',-250,-30,true]]),
+        f('money1',-220,'review',[['espn',-220,0,false],['flashUs',-261,-41,true]]),
         f('spread',4.5,'confirmed',[['espn',-4.5,-9,true],['flashUs',-4.5,-9,true]])]});
       state.current.set('2',{scheduledAt:now+7200000,teams:rows[1].teams,rover:{...rows[1].odds,total:160.5},findings:[]});
       render();
@@ -263,6 +263,44 @@ test('Firefox: no launcher during loading; same size and alignment as native spo
   } finally {await browser.close();}
 });
 
+
+test('Firefox: Moneyline y Spread toleran la diferencia exacta en FT y H1', async () => {
+  const browser = await firefox.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.route('https://roversport.net/**', route => route.fulfill({ contentType: 'text/html', body: fixture }));
+    await page.goto('https://roversport.net/old.php');
+    await page.evaluate(() => { window.GM_getResourceText = () => '{}'; });
+    const marker = '    let renderScheduled = false;';
+    const setup = built.replace(marker, 'window.testAssess = assess; state.lastStarted = Date.now();\n' + marker);
+    await page.addScriptTag({ content: setup });
+
+    const levels = await page.evaluate(() => {
+      const cases = {
+        spread: [4.5, 5.5, 6],
+        h1spread: [-2.5, -3.5, -4],
+        money0: [180, 220, 221],
+        money1: [-220, -260, -261],
+        h1money0: [180, 220, 221],
+        h1money1: [-220, -260, -261],
+        total: [140.5, 142, 142.5],
+        h1total: [65.5, 66, 66.5]
+      };
+      return Object.fromEntries(Object.entries(cases).map(([field, [rover, boundary, alert]]) => [
+        field, [boundary, alert].map(value => {
+          const odds = { [field]: value };
+          const quotes = { flashUs: { odds }, mgm: { odds } };
+          return window.testAssess(field, { [field]: rover }, quotes).level;
+        })
+      ]));
+    });
+    for (const [field, results] of Object.entries(levels)) {
+      assert.deepEqual(results, ['ok', 'confirmed'], field);
+    }
+  } finally {
+    await browser.close();
+  }
+});
 
 test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover moneyline, notifications and threshold', async () => {
   const browser=await firefox.launch({headless:true});
