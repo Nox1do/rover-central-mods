@@ -49,7 +49,7 @@ test('Firefox: grouped markets, current vs prior, filters, isolation and rebuilt
     assert.ok((await host.locator('article[data-event-id="1"]').innerText()).includes('Antes: -205'));
     assert.ok((await host.locator('article[data-event-id="2"]').innerText()).includes('Pendiente de verificar'));
     assert.equal(await page.locator('#logros tr[event_id="1"]').getAttribute('data-rs-vl'),'confirmed');
-    assert.equal(await host.locator('section').evaluate(el=>getComputedStyle(el).borderTopLeftRadius),'12px');
+    assert.equal(await host.locator('#rs-vl-toolbar').evaluate(el=>getComputedStyle(el).borderTopLeftRadius),'12px');
     assert.equal(await page.locator('#outside').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(1, 2, 3)');
     await host.getByRole('button',{name:'Cambios (1)'}).click();
     assert.equal(await host.locator('details[data-event-id]').count(),1);
