@@ -1,0 +1,4 @@
+import fs from "node:fs";
+import {coreFactory} from "../src/core.mjs";
+import {browserMain} from "../src/browser.mjs";
+const root=new URL("../",import.meta.url);const read=p=>fs.readFileSync(new URL(p,root),"utf8");const map=JSON.parse(read("data/team-map.json"));const meta=read("src/header.txt");const out=meta+'\n(()=>{"use strict";\nconst coreFactory='+coreFactory.toString()+';\nconst browserMain='+browserMain.toString()+';\nconst TEAM_MAP='+JSON.stringify(map)+';\nbrowserMain(coreFactory(),TEAM_MAP);\n})();\n';if(process.argv.includes("--check")){if(out!==read("dist/Verificador-de-Lineas.user.js"))throw Error("Distribución no sincronizada");if(out!==read("versions/0.0.1/Verificador-de-Lineas.user.js"))throw Error("Snapshot no sincronizado")}else fs.writeFileSync(new URL("dist/Verificador-de-Lineas.user.js",root),out);

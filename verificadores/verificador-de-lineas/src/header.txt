@@ -1,0 +1,18 @@
+// ==UserScript==
+// @name         Verificador de Lineas
+// @namespace    https://roversport.net/
+// @version      0.0.1
+// @description  Auditor NCAAB FT de solo lectura; alertas y capturas XLSX.
+// @match        https://roversport.net/old.php*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_notification
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_addStyle
+// @connect      site.api.espn.com
+// @connect      api.foxsports.com
+// @connect      www.covers.com
+// @require      https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
