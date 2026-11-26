@@ -9,7 +9,7 @@ assert.ok(src.includes(JSON.stringify(css.trim())), 'El CSS compilado debe coinc
 const built = src.includes("'/* TAILWIND_COMPILED */'")
   ? src.replace("'/* TAILWIND_COMPILED */'", () => JSON.stringify(css))
   : src;
-const fixture = '<div id="logros"><table><tbody><tr><th colspan="4">BASKETBALL</th></tr><tr><td colspan="4">COLLEGE BASKETBALL - 2 active events</td></tr><tr><td>Date</td><td>Teams</td><td>ML</td><td>Spread</td></tr><tr class="eventtr main_event" event_id="1"><td class="fechaCss"><center>12:00 PM</center></td><td><div class="equipo">730 Oklahoma</div><div class="equipo">721 Purdue</div></td><td><xs>+180</xs><xs>-220</xs></td><td><xs>140.5</xs><xs>-4.5</xs></td></tr><tr class="eventtr main_event" event_id="2"><td class="fechaCss"><center>1:00 PM</center></td><td><div class="equipo">646 Miami</div><div class="equipo">715 Michigan</div></td><td><xs>-135</xs><xs>+115</xs></td><td><xs>-2.5</xs><xs>159.5</xs></td></tr></tbody></table></div><button id="outside" style="background:rgb(1,2,3)">Outside</button>';
+const fixture = '<div id="logros"><div class="goToButtons"><button class="goTo" goto="baloncesto">BASKETBALL</button><button class="goTo" goto="futbol">SOCCER</button></div><table><tbody><tr><th colspan="4">BASKETBALL</th></tr><tr><td colspan="4">COLLEGE BASKETBALL - 2 active events</td></tr><tr><td>Date</td><td>Teams</td><td>ML</td><td>Spread</td></tr><tr class="eventtr main_event" event_id="1"><td class="fechaCss"><center>12:00 PM</center></td><td><div class="equipo">730 Oklahoma</div><div class="equipo">721 Purdue</div></td><td><xs>+180</xs><xs>-220</xs></td><td><xs>140.5</xs><xs>-4.5</xs></td></tr><tr class="eventtr main_event" event_id="2"><td class="fechaCss"><center>1:00 PM</center></td><td><div class="equipo">646 Miami</div><div class="equipo">715 Michigan</div></td><td><xs>-135</xs><xs>+115</xs></td><td><xs>-2.5</xs><xs>159.5</xs></td></tr></tbody></table></div><button id="outside" style="background:rgb(1,2,3)">Outside</button>';
 test('Firefox: grouped markets, current vs prior, filters, isolation and rebuilt row', async () => {
   const browser=await firefox.launch({headless:true});
   try {
@@ -35,7 +35,15 @@ test('Firefox: grouped markets, current vs prior, filters, isolation and rebuilt
       render();
     });
     const host=page.locator('#rs-vl-host');
-    assert.equal(await host.locator('article').count(),2);
+    assert.equal(await page.locator('button[goto="futbol"] + #rs-vl-launcher').count(),1);
+    assert.equal(await host.locator('dialog').isVisible(),false);
+    await page.locator('#rs-vl-launcher').click();
+    assert.equal(await host.locator('dialog').isVisible(),true);
+    assert.equal(await host.locator('details[data-event-id]').count(),2);
+    assert.equal(await host.locator('article').count(),0);
+    await host.locator('details[data-event-id="1"] > summary').click();
+    await host.locator('details[data-event-id="2"] > summary').click();
+    await host.locator('article[data-event-id="1"] tbody tr').first().waitFor();
     assert.equal(await host.locator('article[data-event-id="1"] tbody tr').count(),2);
     assert.ok((await host.locator('article[data-event-id="1"]').innerText()).includes('ML · Purdue'));
     assert.ok((await host.locator('article[data-event-id="1"]').innerText()).includes('Antes: -205'));
@@ -44,15 +52,18 @@ test('Firefox: grouped markets, current vs prior, filters, isolation and rebuilt
     assert.equal(await host.locator('section').evaluate(el=>getComputedStyle(el).borderTopLeftRadius),'12px');
     assert.equal(await page.locator('#outside').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(1, 2, 3)');
     await host.getByRole('button',{name:'Cambios (1)'}).click();
-    assert.equal(await host.locator('article').count(),1);
-    assert.equal(await host.locator('article').getAttribute('data-event-id'),'2');
+    assert.equal(await host.locator('details[data-event-id]').count(),1);
+    assert.equal(await host.locator('details[data-event-id]').getAttribute('data-event-id'),'2');
     await host.getByRole('button',{name:'Todos (2)'}).click();
     await page.evaluate(()=>{const tr=document.querySelector('tr[event_id="1"]');const clone=tr.cloneNode(true);clone.removeAttribute('data-rs-vl');tr.replaceWith(clone)});
     await page.waitForFunction(()=>document.querySelector('tr[event_id="1"]').dataset.rsVl==='confirmed');
     await page.setViewportSize({width:420,height:800});
     assert.ok(await host.getByRole('button',{name:'Descargar Lineas'}).isVisible());
-    await host.locator('summary').click();
-    assert.equal(await host.locator('details').evaluate(x=>x.open),false);
+    await page.keyboard.press('Escape');
+    assert.equal(await host.locator('dialog').isVisible(),false);
+    await page.evaluate(()=>{const menu=document.querySelector('.goToButtons');const clone=menu.cloneNode(true);clone.querySelector('#rs-vl-launcher')?.remove();menu.replaceWith(clone)});
+    await page.waitForFunction(()=>!!document.querySelector('button[goto="futbol"] + #rs-vl-launcher'));
+    assert.equal(await page.locator('#rs-vl-launcher').count(),1);
   } finally { await browser.close(); }
 });
 
@@ -90,7 +101,10 @@ test('Firefox: inversiones de favorito, logos, evidencia, niveles y Moneyline si
     },type);
     const host=page.locator('#rs-vl-host');
     const spread=host.locator('[data-inversion="spread"]'), money=host.locator('[data-inversion="money"]');
+    await page.locator('#rs-vl-launcher').click();
     const both=await scenario('both');
+    await host.locator('details[data-event-id="1"] > summary').click();
+    await spread.waitFor();
     assert.equal(both.length,2);
     assert.equal(await spread.getAttribute('data-level'),'confirmed');
     assert.equal(await money.getAttribute('data-level'),'confirmed');
@@ -128,4 +142,61 @@ test('Firefox: inversiones de favorito, logos, evidencia, niveles y Moneyline si
     await page.waitForFunction(()=>[...document.querySelector('#rs-vl-host').shadowRoot.querySelectorAll('[data-inversion="money"] img')].length<2);
     assert.ok((await money.innerText()).includes('Oklahoma'));
   } finally {await browser.close();}
+});
+
+
+test('Firefox: notificación amarilla sin repetición, escalamiento rojo, persistencia y apertura del evento', async () => {
+  const browser=await firefox.launch({headless:true});
+  try {
+    const page=await browser.newPage();
+    await page.route('https://roversport.net/**', route=>route.fulfill({contentType:'text/html',body:fixture}));
+    await page.goto('https://roversport.net/old.php');
+    await page.evaluate(()=>{
+      window.GM_getResourceText=()=> '{}';
+      window.notices=[];
+      window.GM_notification=details=>window.notices.push(details);
+      window.GM_xmlhttpRequest=()=>{throw Error('Unexpected network')};
+    });
+    const marker='    let renderScheduled = false;';
+    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,newAlerts,updateIncidents,saveObservations,notifyAlerts}; state.lastStarted=Date.now();\n'+marker);
+    await page.addScriptTag({content:setup});
+    const counts=await page.evaluate(async()=>{
+      const {state,render,readRover,assessAll,saveObservations,notifyAlerts}=window.testUI;
+      const row=readRover(true)[0], rover=row.odds, now=Date.now(), db=await state.database;
+      if(!db)throw Error('IndexedDB unavailable');
+      const record=(mode,at)=>{
+        const odds=mode==='ok'?rover:{...rover,spread:-4.5};
+        const quotes={espn:{odds},flash:{odds:mode==='red'?odds:rover}};
+        return {key:'qa-notify-1',roverId:row.id,roverTime:row.time,teams:row.teams,scheduledAt:now+3600000,observedAt:at,rover,quotes,findings:assessAll({odds:rover},quotes),signature:mode};
+      };
+      const process=async(mode,offset)=>{
+        const r=record(mode,now+offset);
+        const alerts=await saveObservations(db,[r],now+offset);
+        state.current.set(row.id,r);state.checkedAt=now+offset;render();notifyAlerts(alerts);
+        return alerts.map(a=>a.item.level);
+      };
+      const first=await process('yellow',0), repeat=await process('yellow',1000), red=await process('red',2000), redRepeat=await process('red',3000), ok=await process('ok',4000), again=await process('yellow',5000);
+      return {first,repeat,red,redRepeat,ok,again,notices:window.notices.map(n=>({title:n.title,highlight:n.highlight,text:n.text}))};
+    });
+    assert.deepEqual(counts.first,['review']);
+    assert.deepEqual(counts.repeat,[]);
+    assert.deepEqual(counts.red,['confirmed']);
+    assert.deepEqual(counts.redRepeat,[]);
+    assert.deepEqual(counts.ok,[]);
+    assert.deepEqual(counts.again,['review']);
+    assert.equal(counts.notices.length,3);
+    assert.ok(counts.notices[0].title.includes('amarillo'));
+    assert.equal(counts.notices[0].highlight,true);
+    assert.ok(counts.notices[0].text.includes('Oklahoma'));
+    assert.ok(counts.notices[0].text.includes('Rover +4.5'));
+    const host=page.locator('#rs-vl-host');
+    assert.equal(await host.locator('dialog').isVisible(),false);
+    await page.evaluate(()=>window.notices.at(-1).onclick());
+    assert.equal(await host.locator('dialog').isVisible(),true);
+    assert.equal(await host.locator('details[data-event-id="1"]').evaluate(x=>x.open),true);
+    assert.equal(await host.getByRole('button',{name:'Por revisar (1)'}).getAttribute('aria-pressed'),'true');
+    assert.ok(await host.locator('article[data-event-id="1"]').isVisible());
+    await host.getByRole('button',{name:'Cerrar'}).click();
+    assert.equal(await host.locator('dialog').isVisible(),false);
+  }finally{await browser.close();}
 });
