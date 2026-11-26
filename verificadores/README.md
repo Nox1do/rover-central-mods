@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.2
+# Verificador de Lineas 0.0.3
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -37,7 +37,13 @@ Panel aislado con Shadow DOM y Tailwind CSS 3.4.17 compilado, sin CDN ni Preflig
 
 Compilación reproducible: `npx tailwindcss@3.4.17 -c verificadores/ui/tailwind.config.cjs -i verificadores/ui/tailwind.css -o /tmp/rs-vl.css --minify`. Las pruebas de UI se ejecutan en Firefox headless mediante GitHub Actions, con datos simulados.
 
+## Interfaz 0.0.3
+
+Para inversiones de favorito en Spread o Moneyline, la tarjeta muestra el favorito de Rover y el de las fuentes que observan la inversión, sus logos originales (iniciales si no cargan), las cuotas individuales y, para Spread, un eje con Pick'em y la distancia en puntos. Moneyline muestra una sola vista por partido aunque ambos lados estén afectados. Las discrepancias normales mantienen la tabla. Una inversión solo se presenta en rojo si dos fuentes que sustentan el hallazgo confirman la inversión; si una sola la detecta, se muestra en ámbar incluso si el mercado tiene otra discrepancia confirmada. No cambia la evaluación ni notificación preexistente del motor.
+
 ## Versiones
+
+- **0.0.3** — Vista especial para inversiones de favorito FT, con logos y evidencia por fuente.
 
 - **0.0.2** — Rediseño de interfaz y botones; no cambia el motor de verificación.
 

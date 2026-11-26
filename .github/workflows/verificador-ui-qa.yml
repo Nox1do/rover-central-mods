@@ -1,7 +1,7 @@
 name: Verificador UI QA
 on:
   push:
-    branches: ['verificadores/ui-0.0.2']
+    branches: ['verificadores/ui-*']
   workflow_dispatch:
 permissions:
   contents: read

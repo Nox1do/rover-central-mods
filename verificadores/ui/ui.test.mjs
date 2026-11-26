@@ -55,3 +55,77 @@ test('Firefox: grouped markets, current vs prior, filters, isolation and rebuilt
     assert.equal(await host.locator('details').evaluate(x=>x.open),false);
   } finally { await browser.close(); }
 });
+
+
+test('Firefox: inversiones de favorito, logos, evidencia, niveles y Moneyline sin duplicados', async () => {
+  const browser=await firefox.launch({headless:true});
+  try {
+    const page=await browser.newPage({viewport:{width:900,height:800}});
+    const fixtureWithLogos=fixture.replace('>730 Oklahoma</div>','><img src="/logo-ou.svg" alt="">730 Oklahoma</div>').replace('>721 Purdue</div>','><img src="/logo-pur.svg" alt="">721 Purdue</div>');
+    await page.route('https://roversport.net/**',route=>route.request().url().includes('/logo-')
+      ? route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="#b91c1c"/></svg>'})
+      : route.fulfill({contentType:'text/html',body:fixtureWithLogos}));
+    await page.goto('https://roversport.net/old.php');
+    await page.evaluate(()=>{window.GM_getResourceText=()=> '{}';window.GM_notification=()=>{};window.GM_xmlhttpRequest=()=>{throw Error('Unexpected network')};});
+    const marker='    let renderScheduled = false;';
+    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,inversionViews}; state.lastStarted=Date.now();\n'+marker);
+    await page.addScriptTag({content:setup});
+    const scenario=async (type)=>page.evaluate(type=>{
+      const {state,render,readRover,assessAll,inversionViews}=window.testUI;
+      const row=readRover(true)[0], now=Date.now(), rover=row.odds;
+      let external;
+      if(type==='both') external=[{...rover,spread:-4.5,money0:-220,money1:180},{...rover,spread:-4,money0:-200,money1:170}];
+      else if(type==='mixed') external=[{...rover,spread:-4.5},{...rover,spread:1.5}];
+      else if(type==='review') external=[{...rover,spread:-4.5},{...rover}];
+      else if(type==='normal') external=[{...rover,spread:7.5},{...rover,spread:8}];
+      else if(type==='bothnegative') {
+        row.row.cells[2].innerHTML='<xs>-105</xs><xs>-115</xs>';
+        Object.assign(rover,{money0:-105,money1:-115});
+        external=[{...rover,money0:-115,money1:-105},{...rover,money0:-120,money1:-102}];
+      }
+      const quotes=Object.fromEntries(external.map((odds,i)=>[['espn','flash'][i],{odds}]));
+      const record={scheduledAt:now+3600000,teams:row.teams,rover,quotes,findings:assessAll({odds:rover},quotes)};
+      state.checkedAt=now;state.current.set(row.id,record);render();
+      return inversionViews(record);
+    },type);
+    const host=page.locator('#rs-vl-host');
+    const spread=host.locator('[data-inversion="spread"]'), money=host.locator('[data-inversion="money"]');
+    const both=await scenario('both');
+    assert.equal(both.length,2);
+    assert.equal(await spread.getAttribute('data-level'),'confirmed');
+    assert.equal(await money.getAttribute('data-level'),'confirmed');
+    assert.equal(await money.count(),1);
+    assert.ok((await spread.innerText()).includes('Purdue'));
+    assert.ok((await spread.innerText()).includes('Oklahoma'));
+    assert.ok((await spread.innerText()).includes('8.5–9 puntos'));
+    assert.ok((await spread.innerText()).includes('ESPN / DraftKings -4.5'));
+    assert.equal(await spread.locator('svg[role=img]').count(),1);
+    await spread.locator('img').first().evaluate(img=>img.decode());
+    assert.equal(await spread.locator('img').count(),2);
+    assert.equal(await money.locator('svg').count(),0);
+    assert.ok(!(await money.innerText()).includes('puntos'));
+    await page.setViewportSize({width:420,height:800});
+    assert.ok(await spread.isVisible());
+    const mixed=await scenario('mixed');
+    assert.equal(mixed[0].level,'review');
+    assert.equal(await spread.getAttribute('data-level'),'review');
+    assert.equal(await host.locator('article[data-event-id="1"]').locator('[data-inversion]').count(),1);
+    assert.equal(await page.locator('tr[event_id="1"]').getAttribute('data-rs-vl'),'confirmed');
+    await scenario('review');
+    assert.equal(await spread.getAttribute('data-level'),'review');
+    assert.equal(await page.locator('tr[event_id="1"]').getAttribute('data-rs-vl'),'review');
+    await scenario('normal');
+    assert.equal(await host.locator('[data-inversion]').count(),0);
+    assert.ok(await host.locator('article tbody tr').count()>0);
+    const negative=await scenario('bothnegative');
+    assert.equal(negative.length,1);
+    assert.equal(negative[0].kind,'money');
+    assert.equal(negative[0].level,'confirmed');
+    assert.equal(await money.count(),1);
+    await page.unroute('https://roversport.net/**');
+    await page.route('**/broken.svg',route=>route.fulfill({status:404,body:''}));
+    await page.evaluate(()=>{document.querySelector('tr[event_id="1"] .equipo img').src='/broken.svg';window.testUI.render()});
+    await page.waitForFunction(()=>[...document.querySelector('#rs-vl-host').shadowRoot.querySelectorAll('[data-inversion="money"] img')].length<2);
+    assert.ok((await money.innerText()).includes('Oklahoma'));
+  } finally {await browser.close();}
+});
