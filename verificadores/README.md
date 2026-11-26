@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.7
+# Verificador de Lineas 0.0.8
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -59,7 +59,13 @@ Rover publica H1 spread/total; Moneyline H1 se muestra desde fuentes externas co
 
 FlashscoreUSA consulta el catálogo US/NJ (`projectId=130`, `geoIpCode=US`, `geoIpSubdivisionCode=USNJ`) una sola vez por evento. H1: DraftKings, bet365.us y BetMGM.us, siempre FIRST_HALF. FT: ESPN/DraftKings prioritario, bet365.us y BetMGM.us; Flashscore/DraftKings se muestra y sirve de respaldo únicamente en mercados FULL_TIME_OVER_TIME. El feed observado publica Spread/Total DraftKings bajo FULL_TIME, por lo que no se equiparan a FT con prórroga sin verificar la semántica del proveedor. DraftKings nunca cuenta dos veces por mercado; si ESPN tiene el dato, Flashscore/DraftKings es informativo. FOX conserva su consulta condicional como referencia, pero no confirma independientemente (su API no identifica la casa). Para confirmar rojo se requieren dos casas identificadas con diferencias del mismo signo. Los nombres antiguos de fuentes se conservan en XLSX para el historial 30 días. No cambia el intervalo ni los umbrales. La respuesta usa un mismo agregador, por lo que no se presume independencia de infraestructura ni frescura por cuota. Los parámetros regionales no implican disponibilidad de servicios de apuestas ni garantizan acceso desde toda ubicación. QA valida parser con datos reales y navegador con fixtures; el acceso desde Tampermonkey del usuario requiere prueba local.
 
+## Interfaz 0.0.8
+
+Dos controles compactos de solo icono junto a Eventos y resultados expanden o contraen los detalles de todos los eventos del filtro activo. Conservan el estado de los eventos fuera del filtro y la pestaña FT/H1 seleccionada. Los controles se deshabilitan cuando no hay eventos que expandir o contraer y tienen nombres accesibles y tooltips.
+
 ## Versiones
+
+- **0.0.8** — Iconos para expandir y contraer todos los eventos visibles.
 
 - **0.0.7** — Catálogo US/NJ, H1 con DraftKings, bet365.us y BetMGM.us; deduplicación por casa y exclusión de scopes incompatibles.
 
