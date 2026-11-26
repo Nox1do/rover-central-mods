@@ -895,6 +895,18 @@
     const runButton = ui('button', buttonBase + ' tw-border-slate-900 tw-bg-slate-900 tw-text-white hover:tw-bg-slate-700', 'Verificar ahora');
     const downloadButton = ui('button', buttonBase + ' tw-border-emerald-700 tw-bg-white tw-text-emerald-800 hover:tw-bg-emerald-50', 'Descargar Lineas');
     runButton.type = downloadButton.type = 'button';
+    function actionIcon(paths) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        for (const [name, value] of Object.entries({ width: '16', height: '16', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) svg.setAttribute(name, value);
+        for (const d of paths) {
+            const path = document.createElementNS(svg.namespaceURI, 'path');
+            path.setAttribute('d', d);
+            svg.append(path);
+        }
+        return svg;
+    }
+    runButton.prepend(actionIcon(['M20 11a8 8 0 1 0-2.3 5.7L20 14', 'M20 20v-6h-6']));
+    downloadButton.prepend(actionIcon(['M12 3v12', 'M7 10l5 5 5-5', 'M4 17v3h16v-3']));
     actions.append(runButton, downloadButton);
     head.append(heading, actions);
     const metricGrid = ui('div', 'tw-mt-3 tw-grid tw-grid-cols-2 sm:tw-grid-cols-5 tw-gap-2');
