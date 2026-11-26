@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.2
+// @version      0.0.3
 // @description  Verifica Spread, Total y Moneyline FT pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -705,7 +705,17 @@
             if (!flags.length) continue;
             const level = flags.some(f => f.level === 'confirmed') ? 'confirmed' : 'review';
             item.row.dataset.rsVl = level;
-            groups.push({ id: item.id, teams: record.teams, time: item.time, level, flags, previous: record.previous });
+            const logos = [...item.row.querySelectorAll('div.equipo')].map(node => {
+                const img = node.querySelector('img');
+                try {
+                    const raw = img?.currentSrc || img?.getAttribute('src');
+                    if (!raw) return '';
+                    const url = new URL(raw, document.baseURI);
+                    return ['https:', 'http:'].includes(url.protocol) ? url.href : '';
+                } catch { return ''; }
+            });
+            groups.push({ id: item.id, teams: record.teams, time: item.time, level, flags, previous: record.previous,
+                inversions: inversionViews(record), logos });
         }
         const rank = { confirmed: 0, review: 1, stale: 2 };
         return groups.sort((a, b) => rank[a.level] - rank[b.level]);
@@ -715,6 +725,142 @@
         if (field === 'money0' || field === 'money1') return 'ML · ' + teams[field === 'money0' ? 0 : 1].name;
         if (field === 'spread') return 'Spread · ' + teams[0].name;
         return 'Total FT';
+    }
+
+    // Presentation-only: a confirmed discrepancy need not mean a confirmed reversal.
+    function inversionViews(record) {
+        const views = [];
+        for (const kind of ['spread', 'money']) {
+            const flags = record.findings.filter(f => ['confirmed', 'review'].includes(f.level)
+                && (kind === 'spread' ? f.field === 'spread' : f.field.startsWith('money')));
+            const original = kind === 'spread'
+                ? (isNumber(record.rover.spread) ? Math.sign(record.rover.spread) : 0)
+                : favorite(record.rover);
+            if (!original) continue;
+            const before = original < 0 ? 0 : 1, after = 1 - before;
+            const evidence = [];
+            const confirmed = flags.some(f => f.level === 'confirmed' && f.sign &&
+                new Set(f.entries.filter(e => e.reversed && e.exceeds && Math.sign(e.delta) === f.sign).map(e => e.source)).size >= 2);
+            for (const source of Object.keys(SOURCES)) {
+                const matching = flags.flatMap(f => f.entries.filter(e => e.source === source && e.reversed && e.exceeds));
+                if (!matching.length) continue;
+                const odds = record.quotes?.[source]?.odds;
+                if (!odds) continue;
+                const sign = kind === 'spread'
+                    ? (isNumber(odds.spread) ? Math.sign(odds.spread) : 0)
+                    : favorite(odds);
+                if (sign !== -original) continue;
+                const value = kind === 'spread' ? (after === 0 ? odds.spread : -odds.spread) : odds['money' + after];
+                if (!isNumber(value)) continue;
+                evidence.push({ source, value, reference: kind === 'spread' ? odds.spread : null,
+                    delta: kind === 'spread' ? Math.abs(odds.spread - record.rover.spread) : null });
+            }
+            if (!evidence.length) continue;
+            const value = kind === 'spread'
+                ? (before === 0 ? record.rover.spread : -record.rover.spread)
+                : record.rover['money' + before];
+            if (!isNumber(value)) continue;
+            views.push({ kind, before, after, value, reference: kind === 'spread' ? record.rover.spread : null,
+                level: confirmed && evidence.length >= 2 ? 'confirmed' : 'review', evidence });
+        }
+        return views;
+    }
+
+    function teamLogo(team, url) {
+        const holder = ui('div', 'tw-flex tw-items-center tw-justify-center tw-rounded-lg tw-bg-white tw-border tw-border-slate-200');
+        holder.style.cssText = 'width:48px;height:48px;flex:none';
+        const fallback = ui('span', 'tw-text-sm tw-font-bold tw-text-slate-600',
+            team.name.split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase());
+        holder.append(fallback);
+        if (url) {
+            const img = create('img');
+            img.alt = '';
+            img.width = img.height = 38;
+            img.style.objectFit = 'contain';
+            img.addEventListener('error', () => { img.remove(); fallback.hidden = false; }, { once: true });
+            img.addEventListener('load', () => { fallback.hidden = true; }, { once: true });
+            holder.append(img);
+            fallback.hidden = true;
+            img.src = url;
+        }
+        return holder;
+    }
+
+    function favoriteTile(team, logo, label, value, field, level) {
+        const tile = ui('div', 'tw-rounded-lg tw-border tw-p-3 tw-flex tw-flex-col tw-gap-2 tw-items-center tw-text-center ' +
+            (level ? tones[level].line + ' ' + tones[level].pill : 'tw-border-slate-200 tw-bg-slate-50 tw-text-slate-900'));
+        tile.append(ui('div', 'tw-text-xs tw-font-medium', label), teamLogo(team, logo),
+            ui('div', 'tw-text-sm tw-font-semibold tw-break-words', team.name),
+            ui('div', 'tw-text-xl tw-font-bold tw-tabular-nums', displayValue(field, value)));
+        return tile;
+    }
+
+    function spreadGraphic(view, teams) {
+        const ns = 'http://www.w3.org/2000/svg', color = view.level === 'confirmed' ? '#b91c1c' : '#92400e';
+        const svg = document.createElementNS(ns, 'svg');
+        const add = (tag, attrs) => {
+            const node = document.createElementNS(ns, tag);
+            for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+            svg.append(node); return node;
+        };
+        const values = view.evidence.map(e => e.reference), max = Math.max(1, Math.abs(view.reference), ...values.map(Math.abs));
+        const x = v => 160 + v / max * 116;
+        const start = x(view.reference), end = x(values[0]), dir = Math.sign(end - start);
+        svg.setAttribute('viewBox', '0 0 320 52');
+        svg.setAttribute('class', 'tw-w-full');
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', 'Spread de ' + teams[0].name + ': Rover ' + displayValue('spread', view.reference) +
+            '; fuentes ' + values.map(v => displayValue('spread', v)).join(', '));
+        add('line', { x1: 24, y1: 22, x2: 296, y2: 22, stroke: '#cbd5e1', 'stroke-width': 2 });
+        add('line', { x1: 160, y1: 11, x2: 160, y2: 33, stroke: '#64748b', 'stroke-width': 1 });
+        add('line', { x1: start, y1: 22, x2: end, y2: 22, stroke: color, 'stroke-width': 2.5 });
+        add('path', { d: 'M' + (end-dir*9) + ' 15 L' + end + ' 22 L' + (end-dir*9) + ' 29', fill: 'none', stroke: color, 'stroke-width': 2.5 });
+        add('circle', { cx: start, cy: 22, r: 5, fill: '#64748b' });
+        for (const v of new Set(values)) add('circle', { cx: x(v), cy: 22, r: 4.5, fill: color });
+        const text = (v, xx, yy, fill) => {
+            const n = add('text', { x: xx, y: yy, fill, 'font-size': 11, 'text-anchor': 'middle', 'font-weight': 600 }); n.textContent = v;
+        };
+        text(displayValue('spread', view.reference), start, 12, '#475569');
+        if (new Set(values).size === 1) text(displayValue('spread', values[0]), end, 12, color);
+        text("Pick'em", 160, 46, '#64748b');
+        return svg;
+    }
+
+    function makeInversion(group, view) {
+        const tone = tones[view.level], field = view.kind === 'spread' ? 'spread' : 'money0';
+        const block = ui('section', 'tw-m-0 tw-p-3 tw-border-b tw-border-slate-200 tw-bg-white');
+        block.dataset.inversion = view.kind;
+        block.dataset.level = view.level;
+        const heading = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2');
+        heading.append(ui('strong', 'tw-text-sm tw-font-bold ' + tone.value,
+            'Favorito invertido · ' + (view.kind === 'spread' ? 'Spread FT' : 'Moneyline FT')), badge(view.level));
+        block.append(heading);
+        const pair = ui('div', 'tw-mt-2 tw-grid tw-grid-cols-2 tw-gap-2');
+        const values = [...new Set(view.evidence.map(e => e.value))];
+        const external = favoriteTile(group.teams[view.after], group.logos[view.after], 'Favorito en fuentes externas', values[0], field, view.level);
+        if (values.length > 1) external.lastChild.textContent = values.map(v => displayValue(field, v)).join(' / ');
+        pair.append(favoriteTile(group.teams[view.before], group.logos[view.before], 'Favorito en Rover', view.value, field), external);
+        block.append(pair);
+        if (view.kind === 'spread') {
+            const chart = ui('div', 'tw-mt-2');
+            chart.style.cssText = 'max-width:480px;margin-left:auto;margin-right:auto';
+            chart.append(spreadGraphic(view, group.teams));
+            const labels = ui('div', 'tw-flex tw-justify-between tw-gap-2 tw-text-xs tw-text-slate-500');
+            labels.append(ui('span', 'tw-text-left', group.teams[0].name + ' favorito'), ui('span', 'tw-text-sm', group.teams[1].name + ' favorito'));
+            chart.append(labels); block.append(chart);
+            const distances = [...new Set(view.evidence.map(e => e.delta))].sort((a,b) => a-b);
+            const value = distances.length === 1 ? String(distances[0]) : distances[0] + '–' + distances.at(-1);
+            const distance = ui('div', 'tw-mt-2 tw-flex tw-items-center tw-justify-between tw-gap-2');
+            distance.append(ui('span', 'tw-text-xs tw-text-slate-600', 'Diferencia de Spread'),
+                ui('strong', 'tw-text-xl tw-font-bold ' + tone.value, value + ' puntos'));
+            block.append(distance);
+        }
+        const evidence = ui('div', 'tw-mt-2 tw-flex tw-flex-wrap tw-gap-1');
+        for (const e of view.evidence) evidence.append(ui('span', 'tw-rounded-md tw-bg-slate-100 tw-px-2 tw-py-1 tw-text-xs tw-font-medium tw-text-slate-700',
+            SOURCES[e.source] + ' ' + displayValue(field, e.value)));
+        block.append(evidence, ui('p', 'tw-m-0 tw-mt-2 tw-text-xs tw-font-medium ' + tone.value,
+            view.level === 'confirmed' ? 'Inversión confirmada por las fuentes indicadas.' : 'Inversión pendiente de confirmación; otras diferencias pueden estar confirmadas.'));
+        return block;
     }
 
     function makeCard(group) {
@@ -730,6 +876,7 @@
             card.append(ui('p', 'tw-m-0 tw-px-3 tw-py-3 tw-text-sm tw-text-blue-800', 'La línea de Rover cambió después de la última consulta. Pendiente de verificar.'));
             return card;
         }
+        for (const view of group.inversions || []) card.append(makeInversion(group, view));
         const scroll = ui('div', 'tw-overflow-x-auto');
         const table = ui('table', 'tw-w-full tw-border-collapse tw-text-xs tw-tabular-nums tw-text-left');
         table.setAttribute('aria-label', 'Mercados discrepantes de ' + group.teams.map(t => t.name).join(' vs. '));
@@ -888,7 +1035,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.2'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.3'));
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     const buttonBase = 'tw-inline-flex tw-items-center tw-justify-center tw-gap-2 tw-rounded-lg tw-border tw-px-3 tw-py-2 tw-text-sm tw-font-semibold tw-cursor-pointer tw-transition-colors disabled:tw-opacity-50 disabled:tw-cursor-not-allowed';
