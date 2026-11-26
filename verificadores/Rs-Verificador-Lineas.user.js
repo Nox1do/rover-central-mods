@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.1
+// @version      0.0.2
 // @description  Verifica Spread, Total y Moneyline FT pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -554,6 +554,7 @@
         state.lastStarted = Date.now();
         runButton.disabled = true;
         status.textContent = 'Verificando NCAAB…';
+        runButton.setAttribute('aria-busy', 'true');
         const startedAt = Date.now();
         let foxUnavailable = false;
         try {
@@ -630,17 +631,11 @@
             const failed = [...new Set([...contexts.values()].flatMap(context => context.errors))];
             if (foxUnavailable) failed.push('FOX');
             state.checkedAt = Date.now();
-            const count = level => current.filter(record => record.findings.some(finding => finding.level === level)).length;
             const warnings = [
                 failed.length ? `Sin respuesta de ${failed.join(', ')}` : '',
                 storageError ? 'Historial no disponible' : ''
             ].filter(Boolean);
-            status.textContent = [
-                `${current.filter(record => record.scheduledAt).length} pregame vinculados`,
-                `${current.filter(record => !record.scheduledAt).length} sin vincular`, `${count('confirmed')} con alerta`,
-                `${count('review')} por revisar`, `${count('missing')} con datos incompletos`,
-                `${timeLabel(state.checkedAt)} NY`, ...warnings
-            ].join(' · ');
+            status.textContent = warnings.length ? warnings.join(' · ') : 'Verificación completada';
             render();
         } catch (error) {
             console.warn('[Verificador de Lineas]', error);
@@ -648,6 +643,7 @@
         } finally {
             state.running = false;
             runButton.disabled = false;
+            runButton.removeAttribute('aria-busy');
         }
     }
 
@@ -672,30 +668,134 @@
         return node;
     }
 
-    function render() {
-        const rows = readRover(true);
-        const messages = [];
+    function ui(tag, classes, text = '') {
+        const node = create(tag, text);
+        node.className = classes;
+        return node;
+    }
+
+    function displayValue(field, value) {
+        if (!isNumber(value)) return '—';
+        if (field === 'total') return String(value);
+        return value > 0 ? '+' + value : String(value);
+    }
+
+    const tones = {
+        confirmed: { label: 'Confirmada', pill: 'tw-bg-red-100 tw-text-red-800', line: 'tw-border-red-200', value: 'tw-text-red-700' },
+        review: { label: 'Por revisar', pill: 'tw-bg-amber-100 tw-text-amber-900', line: 'tw-border-amber-200', value: 'tw-text-amber-800' },
+        stale: { label: 'Línea cambió', pill: 'tw-bg-blue-100 tw-text-blue-800', line: 'tw-border-blue-200', value: 'tw-text-blue-700' }
+    };
+
+    function badge(level) {
+        const tone = tones[level];
+        return ui('span', 'tw-inline-flex tw-items-center tw-rounded-full tw-px-2 tw-py-0.5 tw-text-xs tw-font-semibold ' + tone.pill, tone.label);
+    }
+
+    function groupAlerts(rows) {
+        const groups = [];
         for (const item of rows) {
             item.row.removeAttribute('data-rs-vl');
             const record = state.current.get(item.id);
             if (!record || (record.scheduledAt && record.scheduledAt <= Date.now())) continue;
             if (JSON.stringify(item.odds) !== JSON.stringify(record.rover)) {
-                messages.push(`${item.teams.map(team => team.name).join(' – ')} · Línea cambió, pendiente de verificar`);
+                groups.push({ id: item.id, teams: item.teams, time: item.time, level: 'stale', flags: [] });
                 continue;
             }
-            const flags = record.findings.filter(finding => ['confirmed', 'review'].includes(finding.level));
-            if (flags.length) item.row.dataset.rsVl = flags.some(finding => finding.level === 'confirmed') ? 'confirmed' : 'review';
-            for (const flag of flags) {
-                const market = MARKETS[flag.field].label;
-                const providers = flag.entries.map(entry => `${SOURCES[entry.source]} ${entry.value}`).join(' · ');
-                const prior = record.previous?.[flag.field];
-                const change = isNumber(prior) && prior !== flag.rover ? ` · Rover antes ${prior}` : '';
-                const label = flag.level === 'confirmed' ? 'Confirmada' : 'Por revisar';
-                messages.push(`${label} · ${record.teams.map(team => team.name).join(' – ')} · ${market} · Rover ${flag.rover}${change} · ${providers}`);
+            const flags = record.findings.filter(f => ['confirmed', 'review'].includes(f.level));
+            if (!flags.length) continue;
+            const level = flags.some(f => f.level === 'confirmed') ? 'confirmed' : 'review';
+            item.row.dataset.rsVl = level;
+            groups.push({ id: item.id, teams: record.teams, time: item.time, level, flags, previous: record.previous });
+        }
+        const rank = { confirmed: 0, review: 1, stale: 2 };
+        return groups.sort((a, b) => rank[a.level] - rank[b.level]);
+    }
+
+    function marketLabel(field, teams) {
+        if (field === 'money0' || field === 'money1') return 'ML · ' + teams[field === 'money0' ? 0 : 1].name;
+        if (field === 'spread') return 'Spread · ' + teams[0].name;
+        return 'Total FT';
+    }
+
+    function makeCard(group) {
+        const card = ui('article', 'tw-rounded-lg tw-border tw-bg-white tw-overflow-hidden ' + tones[group.level].line);
+        card.dataset.eventId = group.id;
+        const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2 tw-px-3 tw-py-2 tw-bg-slate-50');
+        const names = ui('div', 'tw-min-w-0');
+        names.append(ui('div', 'tw-font-semibold tw-text-sm tw-text-slate-900 tw-break-words', group.teams.map(t => t.name).join(' vs. ')),
+            ui('div', 'tw-text-xs tw-text-slate-500', (group.time || 'Hora pendiente') + ' NY · ID ' + group.id));
+        title.append(names, badge(group.level));
+        card.append(title);
+        if (!group.flags.length) {
+            card.append(ui('p', 'tw-m-0 tw-px-3 tw-py-3 tw-text-sm tw-text-blue-800', 'La línea de Rover cambió después de la última consulta. Pendiente de verificar.'));
+            return card;
+        }
+        const scroll = ui('div', 'tw-overflow-x-auto');
+        const table = ui('table', 'tw-w-full tw-border-collapse tw-text-xs tw-tabular-nums tw-text-left');
+        table.setAttribute('aria-label', 'Mercados discrepantes de ' + group.teams.map(t => t.name).join(' vs. '));
+        const head = ui('thead', 'tw-bg-white tw-text-slate-500');
+        const hr = ui('tr', 'tw-border-b tw-border-slate-200');
+        for (const [main, sub] of [['Mercado',''],['Rover','Actual'],['ESPN','DraftKings'],['Flashscore','bet365'],['FOX Sports','']]) {
+            const th = ui('th', 'tw-px-3 tw-py-2 tw-font-semibold tw-whitespace-nowrap', main);
+            th.scope = 'col';
+            if (sub) th.append(ui('div', 'tw-font-normal tw-text-slate-500', sub));
+            hr.append(th);
+        }
+        head.append(hr); table.append(head);
+        const body = ui('tbody', 'tw-divide-y tw-divide-slate-100');
+        for (const flag of group.flags) {
+            const tr = ui('tr', 'tw-align-top');
+            const market = ui('td', 'tw-px-3 tw-py-2 tw-min-w-36 tw-text-slate-800');
+            market.append(ui('div', 'tw-font-medium', marketLabel(flag.field, group.teams)), badge(flag.level));
+            if (flag.reversed) market.append(ui('div', 'tw-mt-1 tw-font-semibold tw-text-red-700', 'Favorito invertido'));
+            const rv = ui('td', 'tw-px-3 tw-py-2 tw-whitespace-nowrap tw-font-semibold tw-text-slate-900', displayValue(flag.field, flag.rover));
+            const prior = group.previous?.[flag.field];
+            if (isNumber(prior) && prior !== flag.rover) rv.append(ui('div', 'tw-font-normal tw-text-slate-500', 'Antes: ' + displayValue(flag.field, prior)));
+            tr.append(market, rv);
+            for (const key of Object.keys(SOURCES)) {
+                const entry = flag.entries.find(e => e.source === key);
+                const cell = ui('td', 'tw-px-3 tw-py-2 tw-whitespace-nowrap ' + (entry?.exceeds ? 'tw-font-semibold ' + tones[flag.level].value : 'tw-text-slate-700'), displayValue(flag.field, entry?.value));
+                if (entry?.exceeds) {
+                    cell.append(ui('div', 'tw-text-xs tw-font-normal', 'Δ ' + (entry.delta > 0 ? '+' : '') + Number(entry.delta.toFixed(2))));
+                    cell.title = 'Diferencia respecto a Rover';
+                }
+                tr.append(cell);
+            }
+            body.append(tr);
+        }
+        table.append(body); scroll.append(table); card.append(scroll);
+        return card;
+    }
+
+    function render() {
+        const rows = readRover(true);
+        const groups = groupAlerts(rows);
+        const counts = { linked: 0, unlinked: 0, confirmed: 0, review: 0, missing: 0 };
+        for (const item of rows) {
+            const record = state.current.get(item.id);
+            if (!record || (record.scheduledAt && record.scheduledAt <= Date.now())) continue;
+            counts[record.scheduledAt ? 'linked' : 'unlinked']++;
+            for (const level of ['confirmed', 'review', 'missing']) {
+                if (record.findings.some(f => f.level === level)) counts[level]++;
             }
         }
-        alertList.replaceChildren(...messages.map(message => create('li', message)));
-        if (!messages.length) alertList.append(create('li', 'Sin alertas visibles.'));
+        for (const [key, value] of Object.entries(counts)) {
+            metricValues[key].textContent = state.checkedAt ? String(value) : '—';
+        }
+        const total = groups.length;
+        summaryCount.textContent = total + (total === 1 ? ' partido' : ' partidos');
+        checkedLabel.textContent = state.checkedAt ? 'Última consulta: ' + timeLabel(state.checkedAt) + ' NY' : 'Aún sin verificar';
+        for (const [key, button] of Object.entries(filterButtons)) {
+            const n = key === 'all' ? total : groups.filter(g => g.level === key || (key === 'review' && g.flags.some(f => f.level === 'review'))).length;
+            button.textContent = filterNames[key] + ' (' + n + ')';
+            button.setAttribute('aria-pressed', String(activeFilter === key));
+        }
+        const signature = JSON.stringify([activeFilter, groups]);
+        if (signature === lastView) return;
+        lastView = signature;
+        const shown = activeFilter === 'all' ? groups : groups.filter(g => g.level === activeFilter || (activeFilter === 'review' && g.flags.some(f => f.level === 'review')));
+        alertList.replaceChildren(...shown.map(makeCard));
+        if (!shown.length) alertList.append(ui('p', 'tw-m-0 tw-rounded-lg tw-border tw-border-dashed tw-border-slate-200 tw-p-4 tw-text-center tw-text-sm tw-text-slate-500', total ? 'No hay partidos para este filtro.' : 'Sin alertas visibles.'));
     }
 
     function appendSheet(workbook, name, rows) {
@@ -778,28 +878,66 @@
 
     const grid = document.querySelector('#logros');
     if (!grid) return;
-    const toolbar = create('section');
+    const host = create('div');
+    host.id = 'rs-vl-host';
+    const root = host.attachShadow({ mode: 'open' });
+    const toolbar = ui('section', 'tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-p-3 tw-shadow-sm tw-text-slate-800');
     toolbar.id = 'rs-vl-toolbar';
     toolbar.setAttribute('aria-label', 'Verificador de Lineas');
-    const runButton = create('button', 'Verificar ahora');
-    const downloadButton = create('button', 'Descargar Lineas');
+    const head = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-3');
+    const heading = ui('div', 'tw-min-w-0');
+    const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
+    title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.2'));
+    heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT · Pregame · Cada 5 min'));
+    const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
+    const buttonBase = 'tw-inline-flex tw-items-center tw-justify-center tw-gap-2 tw-rounded-lg tw-border tw-px-3 tw-py-2 tw-text-sm tw-font-semibold tw-cursor-pointer tw-transition-colors disabled:tw-opacity-50 disabled:tw-cursor-not-allowed';
+    const runButton = ui('button', buttonBase + ' tw-border-slate-900 tw-bg-slate-900 tw-text-white hover:tw-bg-slate-700', 'Verificar ahora');
+    const downloadButton = ui('button', buttonBase + ' tw-border-emerald-700 tw-bg-white tw-text-emerald-800 hover:tw-bg-emerald-50', 'Descargar Lineas');
     runButton.type = downloadButton.type = 'button';
-    const status = create('span', 'Esperando las líneas de Rover…');
+    actions.append(runButton, downloadButton);
+    head.append(heading, actions);
+    const metricGrid = ui('div', 'tw-mt-3 tw-grid tw-grid-cols-2 sm:tw-grid-cols-5 tw-gap-2');
+    const metricValues = {};
+    for (const [key, label, color] of [
+        ['linked','Vinculados','tw-text-emerald-700'], ['unlinked','Sin vincular','tw-text-slate-700'],
+        ['confirmed','Confirmadas','tw-text-red-700'], ['review','Por revisar','tw-text-amber-800'],
+        ['missing','Datos incompletos','tw-text-slate-600']
+    ]) {
+        const tile = ui('div','tw-rounded-lg tw-border tw-border-slate-200 tw-bg-slate-50 tw-px-3 tw-py-2');
+        metricValues[key] = ui('div', 'tw-text-xl tw-font-bold tw-tabular-nums ' + color, '—');
+        tile.append(ui('div','tw-text-xs tw-font-medium tw-text-slate-600',label), metricValues[key]);
+        metricGrid.append(tile);
+    }
+    const info = ui('div', 'tw-mt-3 tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-1 tw-text-xs tw-text-slate-500');
+    const status = ui('span', 'tw-font-medium tw-text-slate-700', 'Esperando las líneas de Rover…');
     status.setAttribute('role', 'status');
-    const panel = create('details');
-    const alertList = create('ul');
-    panel.append(create('summary', 'Discrepancias'), alertList);
-    toolbar.append(runButton, downloadButton, status, panel);
-    const styles = create('style', `
-        #rs-vl-toolbar { border: 1px solid #bbb; margin: 8px 0; padding: 8px 12px; font: 14px Arial,sans-serif; }
-        #rs-vl-toolbar button { margin: 0 8px 4px 0; padding: 4px 8px; }
-        #rs-vl-toolbar details { margin-top: 4px; }
-        #rs-vl-toolbar ul { margin-bottom: 0; }
-        #logros tr[data-rs-vl="confirmed"] > td:first-child { box-shadow: inset 4px 0 #b02030; background: #fff0f0; }
-        #logros tr[data-rs-vl="review"] > td:first-child { box-shadow: inset 4px 0 #9c6100; background: #fff5db; }
-    `);
+    const checkedLabel = ui('span','tw-tabular-nums','Aún sin verificar');
+    info.append(status, checkedLabel);
+    const panel = ui('details','tw-mt-3 tw-border-t tw-border-slate-200 tw-pt-3');
+    panel.open = true;
+    const summary = ui('summary','tw-cursor-pointer tw-font-semibold tw-text-sm tw-text-slate-800','Discrepancias ');
+    const summaryCount = ui('span','tw-ml-1 tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600','0 partidos');
+    summary.append(summaryCount);
+    const filters = ui('div','tw-mt-3 tw-flex tw-flex-wrap tw-gap-1');
+    const filterNames = { all:'Todos', confirmed:'Confirmadas', review:'Por revisar', stale:'Cambios' };
+    const filterButtons = {};
+    let activeFilter = 'all', lastView = '';
+    for (const [key, label] of Object.entries(filterNames)) {
+        const b = ui('button','tw-rounded-md tw-border tw-border-slate-200 tw-bg-white tw-px-2 tw-py-1 tw-text-xs tw-font-medium tw-text-slate-700 tw-cursor-pointer hover:tw-bg-slate-100',label);
+        b.type = 'button'; b.setAttribute('aria-pressed',String(key === activeFilter));
+        b.addEventListener('click', () => { activeFilter = key; render(); });
+        filterButtons[key] = b; filters.append(b);
+    }
+    const alertList = ui('div','tw-mt-2 tw-flex tw-flex-col tw-gap-2 tw-max-h-96 tw-overflow-y-auto');
+    panel.append(summary, filters, alertList);
+    toolbar.append(head, metricGrid, info, panel);
+    const tailwind = create('style', '/* TAILWIND_COMPILED */');
+    const isolatedStyles = create('style', ':host{display:block;margin:8px 0;font:14px Arial,sans-serif;color:#1e293b;line-height:1.4}*,*::before,*::after{box-sizing:border-box;border-width:0;border-style:solid}button{font-family:inherit}button:focus-visible,summary:focus-visible{outline:2px solid #2563eb;outline-offset:2px}button[aria-pressed="true"]{background:#e2e8f0;border-color:#64748b;color:#0f172a}button[aria-busy="true"]{cursor:wait}table{font:inherit}th,td{vertical-align:top}summary{list-style-position:inside}');
+    root.append(isolatedStyles, tailwind, toolbar);
+    const styles = create('style', '#logros tr[data-rs-vl="confirmed"] > td:first-child { box-shadow: inset 4px 0 #b02030; background: #fff0f0; } #logros tr[data-rs-vl="review"] > td:first-child { box-shadow: inset 4px 0 #9c6100; background: #fff5db; }');
     document.head.append(styles);
-    grid.before(toolbar);
+    grid.before(host);
     runButton.addEventListener('click', verify);
     downloadButton.addEventListener('click', download);
 
