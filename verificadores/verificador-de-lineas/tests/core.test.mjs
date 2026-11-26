@@ -35,3 +35,7 @@ const regression=function regression(C){
  return cases;
 };
 for(const c of regression(coreFactory())) test(c.name,()=>assert.equal(c.ok,true,c.error));
+
+test("Rover fresco",()=>assert.equal(coreFactory().freshStamp("Thursday, November 26 2026 10:27:10 AM",Date.parse("2026-11-26T15:29:00Z")),true));
+test("Rover congelado",()=>assert.equal(coreFactory().freshStamp("Thursday, November 26 2026 10:27:10 AM",Date.parse("2026-11-26T15:40:00Z")),false));
+test("Rover sin timestamp",()=>assert.equal(coreFactory().freshStamp("Thursday, November 26 2026",Date.parse("2026-11-26T15:29:00Z")),false));

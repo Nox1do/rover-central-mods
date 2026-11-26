@@ -28,3 +28,10 @@
 - PASS: Excel snapshot usa líneas actuales
 
 Pruebas ejecutadas directamente en V8 antes de crear el commit. Integración Firefox/Tampermonkey pendiente; no se afirma que haya pasado.
+
+## Segunda revisión
+
+- 29 pruebas unitarias pasaron en V8, incluyendo frescura de Rover.
+- Adapters publicados probados con respuestas reales HTTP 200 de ESPN y FOX: ESPN 20 pregame completos, FOX 20 pregame completos. Oklahoma-Purdue IDs ESPN 401906807 y FOX 264833; spread +4.5/-4.5 y total 140.5 en ambos. Se verificó que los parsers extraen ML por equipo.
+- Corrección de alertas visuales en fallos parciales: el fallo de una fuente no invalida una confirmación de otras dos.
+- Se validó sintaxis de la distribución con compilación de V8. Prueba de navegador real pendiente.
