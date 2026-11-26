@@ -5,6 +5,7 @@ import { firefox } from 'playwright';
 
 const src = readFileSync('verificadores/Rs-Verificador-Lineas.user.js','utf8');
 const css = readFileSync(process.env.VL_CSS || '/tmp/rs-vl.css','utf8');
+assert.ok(src.includes(JSON.stringify(css.trim())), 'El CSS compilado debe coincidir con el CSS incorporado');
 const built = src.includes("'/* TAILWIND_COMPILED */'")
   ? src.replace("'/* TAILWIND_COMPILED */'", () => JSON.stringify(css))
   : src;
