@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.7
+// @version      0.0.8
 // @description  Verifica Spread, Total y Moneyline FT/H1 pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -1065,9 +1065,29 @@
             if (!details.isConnected) return;
             if (details.open) { expandedEvents.add(group.id); populate(); }
             else expandedEvents.delete(group.id);
+            syncExpansionControls();
         });
         details.append(summary, content);
         return details;
+    }
+
+    function visibleEventDetails() {
+        return [...alertList.querySelectorAll(':scope > details[data-event-id]')];
+    }
+
+    function syncExpansionControls() {
+        const details = visibleEventDetails();
+        expandAllButton.disabled = !details.some(event => !event.open);
+        collapseAllButton.disabled = !details.some(event => event.open);
+    }
+
+    function setVisibleExpanded(open) {
+        for (const event of visibleEventDetails()) {
+            if (open) expandedEvents.add(event.dataset.eventId);
+            else expandedEvents.delete(event.dataset.eventId);
+            event.open = open;
+        }
+        syncExpansionControls();
     }
 
     function matchesFilter(group, key) {
@@ -1108,6 +1128,7 @@
         alertList.replaceChildren(...shown.map(makeEvent));
         alertList.scrollTop = scrollTop;
         if (!shown.length) alertList.append(ui('p', 'tw-m-0 tw-rounded-lg tw-border tw-border-dashed tw-border-slate-200 tw-p-4 tw-text-center tw-text-sm tw-text-slate-500', total ? 'No hay partidos para este filtro.' : 'No hay eventos visibles.'));
+        syncExpansionControls();
     }
 
     function appendSheet(workbook, name, rows) {
@@ -1250,7 +1271,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.7'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.8'));
     title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT + H1 · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
@@ -1296,6 +1317,23 @@
     const summary = ui('h3','tw-m-0 tw-font-semibold tw-text-sm tw-text-slate-800','Eventos y resultados ');
     const summaryCount = ui('span','tw-ml-1 tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600','0 partidos');
     summary.append(summaryCount);
+    const panelHeading = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2');
+    const expansionActions = ui('div', 'tw-inline-flex tw-items-center tw-gap-1');
+    function expansionButton(label, paths, open) {
+        const button = ui('button', 'tw-inline-flex tw-items-center tw-justify-center tw-rounded-md tw-border tw-border-slate-200 tw-bg-white tw-text-slate-700 tw-cursor-pointer hover:tw-bg-slate-100 disabled:tw-opacity-50 disabled:tw-cursor-not-allowed');
+        button.type = 'button';
+        button.style.cssText = 'width:28px;height:28px;flex:none';
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        button.disabled = true;
+        button.append(actionIcon(paths));
+        button.addEventListener('click', () => setVisibleExpanded(open));
+        return button;
+    }
+    const expandAllButton = expansionButton('Expandir todos los eventos visibles', ['m6 5 6 6 6-6','m6 13 6 6 6-6'], true);
+    const collapseAllButton = expansionButton('Contraer todos los eventos visibles', ['m6 11 6-6 6 6','m6 19 6-6 6 6'], false);
+    expansionActions.append(expandAllButton, collapseAllButton);
+    panelHeading.append(summary, expansionActions);
     const filters = ui('div','tw-mt-3 tw-flex tw-flex-wrap tw-gap-1');
     const filterNames = { all:'Todos', confirmed:'Confirmadas', review:'Por revisar', stale:'Cambios', missing:'Incompletos', ok:'Sin discrepancias', pending:'Sin verificar' };
     const filterButtons = {};
@@ -1309,7 +1347,7 @@
         filterButtons[key] = b; filters.append(b);
     }
     const alertList = ui('div','tw-mt-2 tw-flex tw-flex-col tw-gap-2 tw-max-h-96 tw-overflow-y-auto');
-    panel.append(summary, filters, alertList);
+    panel.append(panelHeading, filters, alertList);
     toolbar.append(head, metricGrid, info, panel);
     const tailwind = create('style', ".tw-m-0{margin:0}.tw-ml-1{margin-left:.25rem}.tw-mt-1{margin-top:.25rem}.tw-mt-2{margin-top:.5rem}.tw-mt-3{margin-top:.75rem}.tw-flex{display:flex}.tw-inline-flex{display:inline-flex}.tw-grid{display:grid}.tw-max-h-96{max-height:24rem}.tw-w-full{width:100%}.tw-min-w-0{min-width:0}.tw-min-w-36{min-width:9rem}.tw-border-collapse{border-collapse:collapse}.tw-cursor-pointer{cursor:pointer}.tw-grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.tw-flex-col{flex-direction:column}.tw-flex-wrap{flex-wrap:wrap}.tw-items-center{align-items:center}.tw-justify-center{justify-content:center}.tw-justify-between{justify-content:space-between}.tw-gap-1{gap:.25rem}.tw-gap-2{gap:.5rem}.tw-gap-3{gap:.75rem}.tw-divide-y>:not([hidden])~:not([hidden]){--tw-divide-y-reverse:0;border-top-width:calc(1px*(1 - var(--tw-divide-y-reverse)));border-bottom-width:calc(1px*var(--tw-divide-y-reverse))}.tw-divide-slate-100>:not([hidden])~:not([hidden]){--tw-divide-opacity:1;border-color:rgb(241 245 249/var(--tw-divide-opacity,1))}.tw-overflow-hidden{overflow:hidden}.tw-overflow-x-auto{overflow-x:auto}.tw-overflow-y-auto{overflow-y:auto}.tw-whitespace-nowrap{white-space:nowrap}.tw-break-words{overflow-wrap:break-word}.tw-rounded-full{border-radius:9999px}.tw-rounded-lg{border-radius:.5rem}.tw-rounded-md{border-radius:.375rem}.tw-rounded-xl{border-radius:.75rem}.tw-border{border-width:1px}.tw-border-b{border-bottom-width:1px}.tw-border-t{border-top-width:1px}.tw-border-dashed{border-style:dashed}.tw-border-amber-200{--tw-border-opacity:1;border-color:rgb(253 230 138/var(--tw-border-opacity,1))}.tw-border-blue-200{--tw-border-opacity:1;border-color:rgb(191 219 254/var(--tw-border-opacity,1))}.tw-border-emerald-700{--tw-border-opacity:1;border-color:rgb(4 120 87/var(--tw-border-opacity,1))}.tw-border-red-200{--tw-border-opacity:1;border-color:rgb(254 202 202/var(--tw-border-opacity,1))}.tw-border-slate-200{--tw-border-opacity:1;border-color:rgb(226 232 240/var(--tw-border-opacity,1))}.tw-border-slate-900{--tw-border-opacity:1;border-color:rgb(15 23 42/var(--tw-border-opacity,1))}.tw-bg-amber-100{--tw-bg-opacity:1;background-color:rgb(254 243 199/var(--tw-bg-opacity,1))}.tw-bg-blue-100{--tw-bg-opacity:1;background-color:rgb(219 234 254/var(--tw-bg-opacity,1))}.tw-bg-red-100{--tw-bg-opacity:1;background-color:rgb(254 226 226/var(--tw-bg-opacity,1))}.tw-bg-slate-100{--tw-bg-opacity:1;background-color:rgb(241 245 249/var(--tw-bg-opacity,1))}.tw-bg-slate-50{--tw-bg-opacity:1;background-color:rgb(248 250 252/var(--tw-bg-opacity,1))}.tw-bg-slate-900{--tw-bg-opacity:1;background-color:rgb(15 23 42/var(--tw-bg-opacity,1))}.tw-bg-white{--tw-bg-opacity:1;background-color:rgb(255 255 255/var(--tw-bg-opacity,1))}.tw-p-3{padding:.75rem}.tw-p-4{padding:1rem}.tw-px-2{padding-left:.5rem;padding-right:.5rem}.tw-px-3{padding-left:.75rem;padding-right:.75rem}.tw-py-0\\.5{padding-top:.125rem;padding-bottom:.125rem}.tw-py-1{padding-top:.25rem;padding-bottom:.25rem}.tw-py-2{padding-top:.5rem;padding-bottom:.5rem}.tw-py-3{padding-bottom:.75rem}.tw-pt-3,.tw-py-3{padding-top:.75rem}.tw-text-left{text-align:left}.tw-text-center{text-align:center}.tw-align-top{vertical-align:top}.tw-text-base{font-size:1rem;line-height:1.5rem}.tw-text-sm{font-size:.875rem;line-height:1.25rem}.tw-text-xl{font-size:1.25rem;line-height:1.75rem}.tw-text-xs{font-size:.75rem;line-height:1rem}.tw-font-bold{font-weight:700}.tw-font-medium{font-weight:500}.tw-font-normal{font-weight:400}.tw-font-semibold{font-weight:600}.tw-tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal) var(--tw-slashed-zero) var(--tw-numeric-figure) var(--tw-numeric-spacing) var(--tw-numeric-fraction)}.tw-text-amber-800{--tw-text-opacity:1;color:rgb(146 64 14/var(--tw-text-opacity,1))}.tw-text-amber-900{--tw-text-opacity:1;color:rgb(120 53 15/var(--tw-text-opacity,1))}.tw-text-blue-700{--tw-text-opacity:1;color:rgb(29 78 216/var(--tw-text-opacity,1))}.tw-text-blue-800{--tw-text-opacity:1;color:rgb(30 64 175/var(--tw-text-opacity,1))}.tw-text-emerald-700{--tw-text-opacity:1;color:rgb(4 120 87/var(--tw-text-opacity,1))}.tw-text-emerald-800{--tw-text-opacity:1;color:rgb(6 95 70/var(--tw-text-opacity,1))}.tw-text-red-700{--tw-text-opacity:1;color:rgb(185 28 28/var(--tw-text-opacity,1))}.tw-text-red-800{--tw-text-opacity:1;color:rgb(153 27 27/var(--tw-text-opacity,1))}.tw-text-slate-500{--tw-text-opacity:1;color:rgb(100 116 139/var(--tw-text-opacity,1))}.tw-text-slate-600{--tw-text-opacity:1;color:rgb(71 85 105/var(--tw-text-opacity,1))}.tw-text-slate-700{--tw-text-opacity:1;color:rgb(51 65 85/var(--tw-text-opacity,1))}.tw-text-slate-800{--tw-text-opacity:1;color:rgb(30 41 59/var(--tw-text-opacity,1))}.tw-text-slate-900{--tw-text-opacity:1;color:rgb(15 23 42/var(--tw-text-opacity,1))}.tw-text-white{--tw-text-opacity:1;color:rgb(255 255 255/var(--tw-text-opacity,1))}.tw-shadow-sm{--tw-shadow:0 1px 2px 0 rgba(0,0,0,.05);--tw-shadow-colored:0 1px 2px 0 var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow,0 0 #0000),var(--tw-ring-shadow,0 0 #0000),var(--tw-shadow)}.tw-transition-colors{transition-property:color,background-color,border-color,text-decoration-color,fill,stroke;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.hover\\:tw-bg-emerald-50:hover{--tw-bg-opacity:1;background-color:rgb(236 253 245/var(--tw-bg-opacity,1))}.hover\\:tw-bg-slate-100:hover{--tw-bg-opacity:1;background-color:rgb(241 245 249/var(--tw-bg-opacity,1))}.hover\\:tw-bg-slate-700:hover{--tw-bg-opacity:1;background-color:rgb(51 65 85/var(--tw-bg-opacity,1))}.disabled\\:tw-cursor-not-allowed:disabled{cursor:not-allowed}.disabled\\:tw-opacity-50:disabled{opacity:.5}@media (min-width:640px){.sm\\:tw-grid-cols-5{grid-template-columns:repeat(5,minmax(0,1fr))}}");
     const isolatedStyles = create('style', ':host{display:block;margin:8px 0;font:14px Arial,sans-serif;color:#1e293b;line-height:1.4}*,*::before,*::after{box-sizing:border-box;border-width:0;border-style:solid}button{font-family:inherit}button:focus-visible,summary:focus-visible{outline:2px solid #2563eb;outline-offset:2px}button[aria-pressed="true"]{background:#e2e8f0;border-color:#64748b;color:#0f172a}button[aria-busy="true"]{cursor:wait}table{font:inherit}th,td{vertical-align:top}summary{list-style-position:inside}');
