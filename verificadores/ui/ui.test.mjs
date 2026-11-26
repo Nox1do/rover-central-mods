@@ -264,7 +264,7 @@ test('Firefox: no launcher during loading; same size and alignment as native spo
 });
 
 
-test('Firefox: Moneyline y Spread toleran la diferencia exacta en FT y H1', async () => {
+test('Firefox: límites de Moneyline, Spread y Total en FT y H1', async () => {
   const browser = await firefox.launch({ headless: true });
   try {
     const page = await browser.newPage();
@@ -284,7 +284,7 @@ test('Firefox: Moneyline y Spread toleran la diferencia exacta en FT y H1', asyn
         h1money0: [180, 220, 221],
         h1money1: [-220, -260, -261],
         total: [140.5, 142, 142.5],
-        h1total: [65.5, 66, 66.5]
+        h1total: [65.5, 64.5, 64]
       };
       return Object.fromEntries(Object.entries(cases).map(([field, [rover, boundary, alert]]) => [
         field, [boundary, alert].map(value => {
@@ -325,8 +325,8 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
       ];
       const payload={data:{findOddsByEventId:{settings:{bookmakers:[{bookmaker:{id:549,name:'bet365.us'}},{bookmaker:{id:1205,name:'DraftKings'}},{bookmaker:{id:851,name:'BetMGM.us'}},{bookmaker:{id:30,name:'William Hill'}}]},odds:[
         ...odds('FULL_TIME_OVER_TIME',4.5,140.5),
-        ...odds('FIRST_HALF',-2.5,66.5),
-        ...odds('FIRST_HALF',-2.5,66.5,1205),
+        ...odds('FIRST_HALF',-2.5,64),
+        ...odds('FIRST_HALF',-2.5,64,1205),
         ...odds('FULL_TIME',-10,100,1205),
         ...odds('FULL_TIME_OVER_TIME',-10,100,1205).filter(o=>o.bettingType==='HOME_AWAY'),
         ...odds('FIRST_HALF',2.5,65.5,851),
@@ -349,7 +349,7 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
     assert.equal(data.rover.h1spread,2.5);assert.equal(data.rover.h1total,65.5);
     assert.equal(data.rover.h1money0,null);assert.equal(data.second.h1spread,-0.5);
     assert.equal(data.ft.spread,4.5);assert.equal(data.half.spread,-2.5);
-    assert.equal(data.half.total,66.5);assert.equal(data.wh.money0,null);assert.equal(data.wh.spread,2.5);assert.equal(data.dk.spread,-2.5);assert.equal(data.mgm.spread,2.5);
+    assert.equal(data.half.total,64);assert.equal(data.wh.money0,null);assert.equal(data.wh.spread,2.5);assert.equal(data.dk.spread,-2.5);assert.equal(data.mgm.spread,2.5);
     assert.equal(data.quotes.dk.odds.spread,null);assert.equal(data.quotes.dk.odds.total,null);assert.equal(data.quotes.dk.odds.money0,180);
     assert.equal(data.dup.find(f=>f.field==='money0').level,'review');assert.equal(data.dup.find(f=>f.field==='money0').entries.find(e=>e.source==='dk').duplicate,true);
     assert.equal(data.backup.find(f=>f.field==='money0').level,'confirmed');assert.equal(data.foxOnly.find(f=>f.field==='spread').level,'review');assert.equal(data.conflict.find(f=>f.field==='money0').level,'missing');
