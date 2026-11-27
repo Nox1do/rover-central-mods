@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.10
+# Verificador de Lineas 0.0.11
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -64,6 +64,8 @@ FlashscoreUSA consulta el catálogo US/NJ (`projectId=130`, `geoIpCode=US`, `geo
 Dos controles compactos de solo icono junto a Eventos y resultados expanden o contraen los detalles de todos los eventos del filtro activo. Conservan el estado de los eventos fuera del filtro y la pestaña FT/H1 seleccionada. Los controles se deshabilitan cuando no hay eventos que expandir o contraer y tienen nombres accesibles y tooltips.
 
 ## Versiones
+
+- **0.0.11** — Reconoce `St. John's (N.Y.)` y `Nebraska O.` en Flashscore para vincular los partidos de `St. Johns` y `Omaha`. El Moneyline FT ausente en Rover se muestra como «Sin línea en Rover», con las cuotas externas disponibles como referencia.
 
 - **0.0.10** — Total H1 tolera hasta 1 punto de diferencia.
 

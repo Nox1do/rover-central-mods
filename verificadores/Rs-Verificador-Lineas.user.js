@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.10
+// @version      0.0.11
 // @description  Verifica Spread, Total y Moneyline FT/H1 pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -61,6 +61,10 @@
     };
     const BOOKMAKER_KEYS = {espn: 'draftkings', dk: 'draftkings', flashUs: 'bet365', mgm: 'betmgm'};
     const US_ODDS_REGION = {projectId: '130', geoIpCode: 'US', geoIpSubdivisionCode: 'USNJ'};
+    const FLASH_TEAM_ALIASES = new Map([
+        ['saint johns ny', 'saint johns'],
+        ['nebraska o', 'omaha']
+    ]);
     const FIELDS = Object.keys(MARKETS);
     const FT_FIELDS = FIELDS.filter(field => !field.startsWith('h1'));
     const periodOf = field => field.startsWith('h1') ? 'h1' : 'ft';
@@ -298,7 +302,7 @@
             if (fields.ZA) league = fields.ZA;
             if (!/^USA:\s*NCAA$/i.test(league) || !fields.AA || !fields.AD) continue;
             const team = (name, short, alternate, participant) => ({
-                id: participant, names: aliases(name, short, alternate)
+                id: participant, names: aliases(name, short, alternate, FLASH_TEAM_ALIASES.get(normalized(name)))
             });
             events.push({
                 id: fields.AA, start: Number(fields.AD) * 1000, pre: fields.AB === '1',
@@ -454,6 +458,8 @@
         const base = baseField(field);
         const period = periodOf(field);
         const moneyline = base.startsWith('money');
+        const hasRoverLine = isNumber(rv);
+        const showExternalOnly = period === 'h1' || moneyline;
         const allowed = SOURCE_KEYS[period];
         const seenBooks = new Set();
         // ESPN is first for FT; Flashscore DraftKings is a fallback, never a second vote.
@@ -461,12 +467,12 @@
             const odds = sources[source]?.odds;
             if (!odds) return [];
             const value = odds[field];
-            if (!isNumber(value) || (period === 'ft' && !isNumber(rv))) return [];
+            if (!isNumber(value) || (!hasRoverLine && !showExternalOnly)) return [];
             const book = BOOKMAKER_KEYS[source];
             const duplicate = Boolean(book && seenBooks.has(book));
             if (book) seenBooks.add(book);
             const counted = Boolean(book && !duplicate);
-            if (!isNumber(rv)) return [{source, value, delta: null, reversed: false, exceeds: false, counted, duplicate}];
+            if (!hasRoverLine) return [{source, value, delta: null, reversed: false, exceeds: false, counted, duplicate}];
             const delta = moneyline ? americanDistance(value) - americanDistance(rv) : value - rv;
             const reversed = base === 'spread'
                 ? Math.sign(value) * Math.sign(rv) === -1
@@ -480,7 +486,7 @@
             .find(group => group.length >= 2);
         return {
             field, rover: rv, entries,
-            level: period === 'h1' && !isNumber(rv) ? 'unavailable' : confirmed ? 'confirmed' : outliers.length ? 'review' : entries.filter(entry => entry.counted).length >= 2 ? 'ok' : 'missing',
+            level: !hasRoverLine && showExternalOnly ? 'unavailable' : confirmed ? 'confirmed' : outliers.length ? 'review' : entries.filter(entry => entry.counted).length >= 2 ? 'ok' : 'missing',
             sign: confirmed ? Math.sign(confirmed[0].delta) : 0,
             reversed: Boolean(confirmed?.some(entry => entry.reversed) ?? outliers.some(entry => entry.reversed))
         };
@@ -1273,7 +1279,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.10'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.11'));
     title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT + H1 · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
