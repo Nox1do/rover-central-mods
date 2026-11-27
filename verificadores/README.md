@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.11
+# Verificador de Lineas 0.0.12
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -16,7 +16,7 @@ Con **BASKETBALL** visible, la verificación empieza cuando Rover carga la tabla
 
 ESPN/DraftKings, FlashscoreUSA/bet365.us y FlashscoreUSA/BetMGM.us son las fuentes principales FT. FlashscoreUSA/DraftKings sirve como respaldo de la misma casa y nunca suma una confirmación adicional. H1 usa DraftKings, bet365.us y BetMGM.us. FOX se consulta si queda un mercado FT sin confirmar o incompleto y se muestra como referencia, sin contar como casa identificada. El rojo requiere dos casas identificadas que detecten una diferencia en el mismo sentido para el mismo mercado. Una señal sin confirmar se marca en ámbar; las alertas de ambos niveles pueden generar notificaciones de escritorio. La lista **Discrepancias** muestra los valores de Rover y de las fuentes que respondieron.
 
-El cruce utiliza los códigos de equipo del mapa NCAAB, ambos equipos y la hora de inicio en Nueva York. El orden de equipos se ajusta por fuente. Un cruce ambiguo queda sin vincular. En Flashscore se toman selecciones activas de FT con prórroga. Si hay varias líneas con ambos lados activos, se toma la pareja con los precios más equilibrados.
+El cruce utiliza los códigos de Rover de ambos equipos y la hora de inicio en Nueva York. Flashscore prioriza los IDs fijos del [mapa versionado de 365 equipos](versions/0.0.12/ncaab-teams.json). Si falta un ID, el nombre o un alias permite vincular un cruce único. Si dos IDs conocidos se contradicen, se descarta ese candidato. Los IDs de participantes del partido conservan el orden correcto de las cuotas. En Flashscore se toman selecciones activas de FT con prórroga. Si hay varias líneas con ambos lados activos, se toma la pareja con los precios más equilibrados.
 
 ## Descargar Lineas
 
@@ -64,6 +64,8 @@ FlashscoreUSA consulta el catálogo US/NJ (`projectId=130`, `geoIpCode=US`, `geo
 Dos controles compactos de solo icono junto a Eventos y resultados expanden o contraen los detalles de todos los eventos del filtro activo. Conservan el estado de los eventos fuera del filtro y la pestaña FT/H1 seleccionada. Los controles se deshabilitan cuando no hay eventos que expandir o contraer y tienen nombres accesibles y tooltips.
 
 ## Versiones
+
+- **0.0.12** — Vincula los equipos por sus IDs fijos de Flashscore, con nombres y alias como respaldo.
 
 - **0.0.11** — Reconoce `St. John's (N.Y.)` y `Nebraska O.` en Flashscore para vincular los partidos de `St. Johns` y `Omaha`. El Moneyline FT ausente en Rover se muestra como «Sin línea en Rover», con las cuotas externas disponibles como referencia.
 
