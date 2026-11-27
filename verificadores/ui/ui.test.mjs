@@ -313,8 +313,32 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
     await page.goto('https://roversport.net/old.php');
     await page.evaluate(()=>{window.GM_getResourceText=()=> '{}';window.notices=[];window.GM_notification=n=>window.notices.push(n);window.GM_xmlhttpRequest=()=>{throw Error('Unexpected network')};});
     const marker='    let renderScheduled = false;';
-    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,parseFlashOdds,parseUsFlashQuotes,asHalf,flipOdds,inversionViews,notifyAlerts,roverHalfSpread}; state.lastStarted=Date.now();\n'+marker);
+    const setup=built.replace(marker,'window.testUI={state,render,readRover,assessAll,parseFlashFeed,matchEvent,parseFlashOdds,parseUsFlashQuotes,asHalf,flipOdds,inversionViews,notifyAlerts,roverHalfSpread}; state.lastStarted=Date.now();\n'+marker);
     await page.addScriptTag({content:setup});
+    const flashMatches = await page.evaluate(() => {
+      const { parseFlashFeed, matchEvent } = window.testUI;
+      const events = parseFlashFeed([
+        'ZA÷USA: NCAA¬',
+        "AA÷291kzhDk¬AB÷1¬AD÷1795744800¬AE÷St. John's (N.Y.)¬AF÷Louisville¬WM÷JOH¬WN÷LOU¬JA÷Wz6uMAjt¬JB÷vu8WUpID¬",
+        'AA÷bZ1I0KEc¬AB÷1¬AD÷1795750200¬AE÷Nebraska O.¬AF÷Pacific¬WM÷NEB¬WN÷PAC¬JA÷rNPjjHdT¬JB÷CxGMpeKj¬',
+        'AA÷OpF8bsJc¬AB÷1¬AD÷1795744800¬AE÷Kansas State¬AF÷Alabama¬WM÷KAN¬WN÷ALA¬JA÷jNyDZAD7¬JB÷I9w5yXre¬'
+      ].join('~'));
+      const cases = [
+        [1260, 'louisville', 'saint johns'],
+        [1350, 'pacific', 'omaha'],
+        [1260, 'alabama', 'kansas state']
+      ];
+      return cases.map(([minutes, ...names]) => {
+        const row = { minutes, teams: names.map(name => ({ names: [name] })) };
+        const match = matchEvent(row, events, Date.parse('2026-11-27T01:13:00Z'));
+        return match && { id: match.event.id, participants: match.order.map(index => match.event.teams[index].id) };
+      });
+    });
+    assert.deepEqual(flashMatches, [
+      { id: '291kzhDk', participants: ['vu8WUpID', 'Wz6uMAjt'] },
+      { id: 'bZ1I0KEc', participants: ['CxGMpeKj', 'rNPjjHdT'] },
+      { id: 'OpF8bsJc', participants: ['I9w5yXre', 'jNyDZAD7'] }
+    ]);
     const data=await page.evaluate(()=>{
       const {state,render,readRover,assessAll,parseFlashOdds,parseUsFlashQuotes,asHalf,flipOdds,inversionViews,roverHalfSpread}=window.testUI;
       const rows=readRover(true), row=rows[0], rover=row.odds, now=Date.now();
@@ -341,10 +365,12 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
       const foxOnly=assessAll(row,{espn:{odds:{spread:-4.5}},fox:{odds:{spread:-4.5}}});
       const conflict=assessAll(row,{espn:{odds:{money0:180,money1:-220}},dk:{odds:{money0:250,money1:-300}}});
       const record={scheduledAt:now+3600000,teams:row.teams,rover,quotes,findings:assessAll(row,quotes)};
+      const unavailableML = assessAll({ odds: { ...rover, money0: null, money1: null } }, quotes)
+        .filter(item => item.field === 'money0' || item.field === 'money1');
       const one=assessAll(row,{espn:quotes.espn,flashUs:quotes.flashUs});
       const normal=assessAll(row,{flashUs:{odds:{h1spread:2.5,h1total:65.9}},dk:{odds:{h1spread:2.5,h1total:65.9}}});
       state.current.set(row.id,record);state.checkedAt=now;render();
-      return {rover,second:rows[1].odds,ft,half,dk,mgm,wh,quotes,dup,backup,foxOnly,conflict,findings:record.findings,inversions:inversionViews(record),one,normal,empty:roverHalfSpread(['',''])};
+      return {rover,second:rows[1].odds,ft,half,dk,mgm,wh,quotes,dup,backup,foxOnly,conflict,unavailableML,findings:record.findings,inversions:inversionViews(record),one,normal,empty:roverHalfSpread(['',''])};
     });
     assert.equal(data.rover.h1spread,2.5);assert.equal(data.rover.h1total,65.5);
     assert.equal(data.rover.h1money0,null);assert.equal(data.second.h1spread,-0.5);
@@ -359,6 +385,9 @@ test('Firefox: H1 isolated from FT, independent sources, tabs, missing Rover mon
     assert.equal(data.findings.find(f=>f.field==='h1total').level,'confirmed');
     assert.equal(data.findings.find(f=>f.field==='h1money0').level,'unavailable');
     assert.equal(data.findings.find(f=>f.field==='h1money0').entries.length,3);
+    assert.deepEqual(data.unavailableML.map(item => item.level), ['unavailable', 'unavailable']);
+    assert.deepEqual(data.unavailableML.map(item => item.entries[0].value), [180, -220]);
+    assert.ok(data.unavailableML.every(item => item.entries.every(entry => entry.delta === null && !entry.exceeds)));
     assert.equal(data.one.find(f=>f.field==='h1spread').level,'review');
     assert.equal(data.normal.find(f=>f.field==='h1total').level,'ok');
     assert.equal(data.inversions.length,1);assert.equal(data.inversions[0].period,'h1');
