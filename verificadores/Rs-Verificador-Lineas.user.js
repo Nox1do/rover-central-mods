@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.11
+// @version      0.0.12
 // @description  Verifica Spread, Total y Moneyline FT/H1 pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -17,7 +17,7 @@
 // @connect      global.ds.lsapp.eu
 // @connect      api.foxsports.com
 // @require      https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js#sha256=cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41
-// @resource     ncaabTeams https://raw.githubusercontent.com/Nox1do/rover-basketball/5ffea472544f17a2c832a9f589d5a28c002ed57d/CBB%20EF%20Score/data/cbb-rover-espn-fox-team-map.json#sha256=c7e597a1c9bb861b631eb9d75b239c77d1cac7738750626a5bf400ba06467434
+// @resource     ncaabTeams https://raw.githubusercontent.com/Nox1do/rover-central-mods/main/verificadores/versions/0.0.12/ncaab-teams.json#sha256=51c096c5205337e1d5fbc84f8840a8fc0a053629fe57bf6a0a0f30d99d2daa22
 // @updateURL    https://raw.githubusercontent.com/Nox1do/rover-central-mods/main/verificadores/Rs-Verificador-Lineas.user.js
 // @downloadURL  https://raw.githubusercontent.com/Nox1do/rover-central-mods/main/verificadores/Rs-Verificador-Lineas.user.js
 // ==/UserScript==
@@ -160,7 +160,7 @@
         const name = pieces?.[2] ?? clean(node.textContent);
         const mapped = teamMap[id];
         return {
-            id, name, espnId: mapped?.espn_id || '',
+            id, name, espnId: mapped?.espn_id || '', flashId: mapped?.flashscore_id || '',
             names: aliases(name, mapped?.rover_name, mapped?.espn_name, mapped?.fox_name)
         };
     }
@@ -301,13 +301,13 @@
             const fields = Object.fromEntries(entries);
             if (fields.ZA) league = fields.ZA;
             if (!/^USA:\s*NCAA$/i.test(league) || !fields.AA || !fields.AD) continue;
-            const team = (name, short, alternate, participant) => ({
-                id: participant, names: aliases(name, short, alternate, FLASH_TEAM_ALIASES.get(normalized(name)))
+            const team = (name, short, alternate, flashId, participantId) => ({
+                flashId, participantId, names: aliases(name, short, alternate, FLASH_TEAM_ALIASES.get(normalized(name)))
             });
             events.push({
                 id: fields.AA, start: Number(fields.AD) * 1000, pre: fields.AB === '1',
-                teams: [team(fields.AE, fields.WM, fields.CX, fields.JA || fields.AU),
-                    team(fields.AF, fields.WN, fields.CY, fields.JB || fields.AV)]
+                teams: [team(fields.AE, fields.WM, fields.CX, fields.PX, fields.JA || fields.AU),
+                    team(fields.AF, fields.WN, fields.CY, fields.PY, fields.JB || fields.AV)]
             });
         }
         return events;
@@ -325,20 +325,23 @@
         return [...new Map(events.filter(event => isNumber(event.start)).map(event => [event.id, event])).values()];
     }
 
-    function align(row, candidate, espnEvent, isEspn) {
+    function align(row, candidate, espnEvent, source) {
         const ep = espnEvent?.order.map(index => espnEvent.event.teams[index]);
-        const matches = (team, source, index) => {
-            if (isEspn && team.espnId) return String(team.espnId) === source.id;
+        const evidence = (team, other, index) => {
+            if (source === 'espn' && team.espnId) return String(team.espnId) === other.id ? 2 : 0;
+            if (source === 'flash' && team.flashId && other.flashId) return team.flashId === other.flashId ? 2 : 0;
             const byName = aliases(team.names, ep?.[index]?.names);
-            return source.names.some(name => byName.includes(name));
+            return other.names.some(name => byName.includes(name)) ? 1 : 0;
         };
-        const orders = [[0, 1], [1, 0]].filter(order =>
-            row.teams.every((team, index) => matches(team, candidate.teams[order[index]], index))
-        );
-        return orders.length === 1 ? orders[0] : null;
+        const orders = [[0, 1], [1, 0]].flatMap(order => {
+            const results = row.teams.map((team, index) => evidence(team, candidate.teams[order[index]], index));
+            return results.every(Boolean) ? [{ order, idMatches: results.filter(result => result === 2).length }] : [];
+        });
+        orders.sort((a, b) => b.idMatches - a.idMatches);
+        return orders[0] && orders[0].idMatches !== orders[1]?.idMatches ? orders[0] : null;
     }
 
-    function matchEvent(row, candidates, now, espnEvent = null, isEspn = false) {
+    function matchEvent(row, candidates, now, source, espnEvent = null) {
         if (row.minutes === null) return null;
         const matches = [];
         for (const event of candidates) {
@@ -346,12 +349,14 @@
             if (espnEvent && Math.abs(event.start - espnEvent.event.start) > MAX_START_DRIFT * MINUTE) continue;
             const drift = clockDistance(row.minutes, clockMinutes(TIME_FORMAT.format(event.start)));
             if (drift > MAX_START_DRIFT) continue;
-            const order = align(row, event, espnEvent, isEspn);
-            if (order) matches.push({ event, order, drift });
+            const alignment = align(row, event, espnEvent, source);
+            if (alignment) matches.push({ event, ...alignment, drift });
         }
-        matches.sort((a, b) => a.drift - b.drift);
-        if (!matches.length || (matches[1] && matches[0].drift === matches[1].drift)) return null;
-        return matches[0];
+        matches.sort((a, b) => b.idMatches - a.idMatches || a.drift - b.drift);
+        const [best, next] = matches;
+        if (!best) return null;
+        if (next?.idMatches === best.idMatches && (next.drift === best.drift || (source === 'flash' && best.idMatches < 2))) return null;
+        return best;
     }
 
     function flipOdds(odds, order) {
@@ -404,7 +409,7 @@
             _hash: 'oce', eventId: match.event.id, ...US_ODDS_REGION
         });
         const payload = await request(`https://global.ds.lsapp.eu/odds/pq_graphql?${params}`);
-        const teams = match.order.map(index => match.event.teams[index].id);
+        const teams = match.order.map(index => match.event.teams[index].participantId);
         return parseUsFlashQuotes(payload, teams, match.event.id);
     }
 
@@ -635,8 +640,8 @@
                 .map(async profile => [profile, await readSources(profile, startedAt)])));
             const records = await mapWithLimit(rows, 4, async row => {
                 const context = contexts.get(row.profile);
-                const espn = matchEvent(row, context.espn, startedAt, null, true);
-                const flash = matchEvent(row, context.flash, startedAt, espn);
+                const espn = matchEvent(row, context.espn, startedAt, 'espn');
+                const flash = matchEvent(row, context.flash, startedAt, 'flash', espn);
                 const matches = [espn, flash].filter(Boolean);
                 if (matches.some(match => !match.event.pre || match.event.start <= startedAt)) return null;
                 const quotes = {};
@@ -655,7 +660,7 @@
                         console.warn('[Verificador de Lineas] FOX', error);
                         return [];
                     });
-                    const fox = matchEvent(row, await context.fox, startedAt, espn);
+                    const fox = matchEvent(row, await context.fox, startedAt, 'fox', espn);
                     if (fox && !fox.event.pre) return null;
                     if (fox) {
                         matches.push(fox);
@@ -1279,7 +1284,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.11'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.12'));
     title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT + H1 · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
