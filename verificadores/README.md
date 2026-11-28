@@ -1,4 +1,4 @@
-# Verificador de Lineas 0.0.12
+# Verificador de Lineas 0.0.13
 
 Userscript para Firefox y Tampermonkey en la [página pública de líneas de Rover](https://roversport.net/old.php).
 
@@ -29,7 +29,7 @@ El botón genera un archivo `.xlsx` con cuatro hojas.
 | Fuentes | Cuotas FT y H1 e identificadores de los partidos consultados. |
 | Historial 30 dias | Cambios observados, primera diferencia, confirmación y resolución. |
 
-El historial se conserva en IndexedDB durante 30 días en el perfil de Firefox y dominio donde se usa el script. Una resolución requiere dos referencias comparables dentro del umbral. La notificación se emite al detectar una nueva discrepancia amarilla y al confirmar una roja. IndexedDB conserva el estado de aviso por incidente para evitar repeticiones; una resolución permite volver a notificar. Al pulsar la notificación, Tampermonkey solicita resaltar la pestaña original y el script abre el modal y el evento correspondiente. El sistema operativo y Firefox gestionan la presentación y el foco.
+El historial se conserva en IndexedDB durante 30 días en el perfil de Firefox y dominio donde se usa el script. Una resolución requiere dos referencias comparables dentro del umbral. La notificación se emite al detectar una nueva discrepancia amarilla y al confirmar una roja. IndexedDB conserva el estado de aviso por incidente para evitar repeticiones. Una resolución permite volver a notificar. Cada aviso tiene un identificador único y un vencimiento de 24 horas en Tampermonkey. Firefox y Windows gestionan la duración del banner y la retención en el Centro de actividades. Si la pestaña original sigue disponible, al pulsar el aviso el script abre el modal y el evento correspondiente.
 
 ## Interfaz 0.0.2
 
@@ -64,6 +64,8 @@ FlashscoreUSA consulta el catálogo US/NJ (`projectId=130`, `geoIpCode=US`, `geo
 Dos controles compactos de solo icono junto a Eventos y resultados expanden o contraen los detalles de todos los eventos del filtro activo. Conservan el estado de los eventos fuera del filtro y la pestaña FT/H1 seleccionada. Los controles se deshabilitan cuando no hay eventos que expandir o contraer y tienen nombres accesibles y tooltips.
 
 ## Versiones
+
+- **0.0.13** — Amplía el vencimiento de las notificaciones de escritorio de 12 segundos a 24 horas y asigna un identificador único a cada aviso.
 
 - **0.0.12** — Vincula los equipos por sus IDs fijos de Flashscore, con nombres y alias como respaldo.
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rs - Verificador de Lineas
 // @namespace    noe/roversport/verificadores
-// @version      0.0.12
+// @version      0.0.13
 // @description  Verifica Spread, Total y Moneyline FT/H1 pregame de NCAAB en Rover y exporta las líneas a Excel.
 // @author       noeg
 // @match        https://roversport.net/old.php*
@@ -743,7 +743,7 @@
             try {
                 GM_notification({
                     title: level === 'confirmed' ? 'Rover · Discrepancia confirmada' : 'Rover · Líneas por revisar (amarillo)',
-                    text, timeout: 12000, highlight: true, silent: false,
+                    text, tag: `rs-vl-${crypto.randomUUID()}`, timeout: DAY, highlight: true, silent: false,
                     onclick: () => {
                         window.focus();
                         activeFilter = level;
@@ -1284,7 +1284,7 @@
     const heading = ui('div', 'tw-min-w-0');
     const title = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');
     title.append(ui('h2', 'tw-m-0 tw-text-base tw-font-bold tw-text-slate-900', 'Verificador de Lineas'),
-        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.12'));
+        ui('span', 'tw-rounded-full tw-bg-slate-100 tw-px-2 tw-py-0.5 tw-text-xs tw-font-medium tw-text-slate-600', '0.0.13'));
     title.firstChild.id = 'rs-vl-title';
     heading.append(title, ui('div', 'tw-mt-1 tw-text-xs tw-text-slate-500', 'NCAAB · FT + H1 · Pregame · Cada 5 min'));
     const actions = ui('div', 'tw-flex tw-flex-wrap tw-items-center tw-gap-2');

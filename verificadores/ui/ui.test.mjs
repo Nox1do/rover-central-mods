@@ -199,7 +199,7 @@ test('Firefox: notificación amarilla sin repetición, escalamiento rojo, persis
         return alerts.map(a=>a.item.level);
       };
       const first=await process('yellow',0), repeat=await process('yellow',1000), red=await process('red',2000), redRepeat=await process('red',3000), ok=await process('ok',4000), again=await process('yellow',5000);
-      return {first,repeat,red,redRepeat,ok,again,notices:window.notices.map(n=>({title:n.title,highlight:n.highlight,text:n.text}))};
+      return {first,repeat,red,redRepeat,ok,again,notices:window.notices.map(({ title, highlight, text, timeout, tag }) => ({ title, highlight, text, timeout, tag }))};
     });
     assert.deepEqual(counts.first,['review']);
     assert.deepEqual(counts.repeat,[]);
@@ -208,6 +208,9 @@ test('Firefox: notificación amarilla sin repetición, escalamiento rojo, persis
     assert.deepEqual(counts.ok,[]);
     assert.deepEqual(counts.again,['review']);
     assert.equal(counts.notices.length,3);
+    assert.ok(counts.notices.every(notice => notice.timeout === 24 * 60 * 60 * 1000));
+    assert.ok(counts.notices.every(notice => notice.tag?.startsWith('rs-vl-')));
+    assert.equal(new Set(counts.notices.map(notice => notice.tag)).size, counts.notices.length);
     assert.ok(counts.notices[0].title.includes('amarillo'));
     assert.equal(counts.notices[0].highlight,true);
     assert.ok(counts.notices[0].text.includes('Oklahoma'));
